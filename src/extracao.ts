@@ -112,14 +112,16 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
   for (const c of r.compromissos) {
     const quando = c.quando ? new Date(c.quando) : null;
     const valida = quando && !Number.isNaN(quando.getTime()) ? quando : null;
+    // No banco o dono continua sendo "eu" (é o que o agente e o painel já leem).
+    const responsavel = c.quem_faz === "dono" ? "eu" : c.quem_faz;
     const id = await repo.criarCompromisso(db, {
       chatJid: jid,
       descricao: c.descricao,
       quando: valida,
-      responsavel: c.responsavel,
+      responsavel,
       mensagemId: novas[novas.length - 1].id,
     });
-    if (id && valida && c.responsavel !== "contato" && valida.getTime() - agora.getTime() < AVISO_HORAS * 3600_000) {
+    if (id && valida && responsavel !== "contato" && valida.getTime() - agora.getTime() < AVISO_HORAS * 3600_000) {
       avisos.push(`#${id} ${c.descricao} — ${dataCurta(valida, deps.fuso)} (${nome})`);
     }
   }

@@ -156,9 +156,9 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     const amanha = new Date(Date.now() + 20 * 3600_000).toISOString();
     ia.resposta = {
       compromissos: [
-        { descricao: "mandar o orçamento da cozinha", quando: amanha, responsavel: "eu" },
-        { descricao: "Fernanda passar as medidas", quando: amanha, responsavel: "contato" },
-        { descricao: "ver a cor da bancada", quando: null, responsavel: "eu" },
+        { descricao: "mandar o orçamento da cozinha", quando: amanha, quem_faz: "dono" },
+        { descricao: "Fernanda passar as medidas", quando: amanha, quem_faz: "contato" },
+        { descricao: "ver a cor da bancada", quando: null, quem_faz: "dono" },
       ],
       fatos: ["marido se chama Ricardo"],
       precisa_resposta: true,

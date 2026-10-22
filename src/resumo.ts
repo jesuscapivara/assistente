@@ -104,6 +104,10 @@ export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: st
       "*Compromissos (hoje e amanhã)*\n" +
         dia.comData
           .map((c) => {
+            // O que o outro ficou de fazer não é tarefa do dono: aparece, mas dito assim.
+            if (c.responsavel === "contato") {
+              return `#${c.id} ${dataCurta(new Date(c.quando!), fuso)} — ${c.contato_nome ?? "?"} ficou de: ${c.descricao}`;
+            }
             const atrasado = new Date(c.quando!) < agora ? " ⚠️ atrasado" : "";
             return `#${c.id} ${dataCurta(new Date(c.quando!), fuso)} — ${c.descricao} (${c.contato_nome ?? "?"})${atrasado}`;
           })

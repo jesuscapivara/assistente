@@ -105,6 +105,16 @@ describe("resumo", () => {
     expect(refs).toBe("Ana = x@s.whatsapp.net");
   });
 
+  it("o que o contato ficou de fazer não vira tarefa do dono", async () => {
+    // O caso do README: o dono mandou, o contato disse "vou ler".
+    const dia = diaVazio();
+    dia.comData = [
+      { id: 1, chat_jid: "t", descricao: "ler o README que o Lucas mandou", quando: em(20), responsavel: "contato", status: "sugerido", contato_nome: "Toshio" },
+    ];
+    expect(resumoEmTexto(dia, "Lucas", SP).texto).toMatch(/#1 22\/10 20:00 — Toshio ficou de: ler o README/);
+    expect((await planoDoCartao(null, dia, "Lucas", SP)).precisa).toEqual([]);
+  });
+
   it("dia vazio é uma linha calma", () => {
     expect(resumoEmTexto(diaVazio(), "Lucas", SP).texto).toBe("Bom dia, Lucas! (quinta, 22/10) Nada pendente por aqui hoje.");
   });

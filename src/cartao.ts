@@ -57,7 +57,8 @@ function itensComRef(dia: Dia, fuso: string): { texto: string; refs: Map<string,
   dia.eventosAmanha.forEach((e, i) => add(`A${i + 1}`, `[agenda amanhã] ${e.diaInteiro ? "dia inteiro" : hora(e.inicio, fuso)} ${e.titulo}`));
   for (const c of dia.comData) {
     const atrasado = new Date(c.quando!) < dia.agora ? " (atrasado)" : "";
-    add(`#${c.id}`, `[compromisso] ${dataCurta(new Date(c.quando!), fuso)} ${c.descricao} — ${c.contato_nome ?? "?"}${atrasado}`);
+    const quem = c.responsavel === "contato" ? `[o contato ficou de fazer, não é tarefa do dono]` : "[compromisso do dono]";
+    add(`#${c.id}`, `${quem} ${dataCurta(new Date(c.quando!), fuso)} ${c.descricao} — ${c.contato_nome ?? "?"}${atrasado}`);
   }
   for (const c of dia.semData) add(`#${c.id}`, `[promessa sem data] ${c.descricao} — ${c.contato_nome ?? "?"}`);
   dia.esperando.forEach((e, i) =>
@@ -84,7 +85,7 @@ function planoSemModelo(dia: Dia, dono: string, fuso: string): Plano {
     return { faixa: b.faixa, frase: evs.length ? evs.map((e) => `${hora(e.inicio, fuso)} ${e.titulo}`).join(" · ") : "Livre." };
   });
   const precisa = [
-    ...dia.comData.map((c) => ({ ref: `#${c.id}`, titulo: c.descricao, frase: `Combinado com ${c.contato_nome ?? "?"}, ${dataCurta(new Date(c.quando!), fuso)}.` })),
+    ...dia.comData.filter((c) => c.responsavel !== "contato").map((c) => ({ ref: `#${c.id}`, titulo: c.descricao, frase: `Combinado com ${c.contato_nome ?? "?"}, ${dataCurta(new Date(c.quando!), fuso)}.` })),
     ...dia.esperando.map((e, i) => ({ ref: `W${i + 1}`, titulo: `${e.nome} espera resposta`, frase: e.situacao || `"${e.ultima.slice(0, 120)}"` })),
   ].slice(0, 6);
   const resolvido = dia.resolvidos.slice(0, 4).map((r, i) => ({ ref: `R${i + 1}`, frase: `${r.descricao} — ${r.contato}.` }));

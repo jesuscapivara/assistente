@@ -18,12 +18,16 @@ export const ExtracaoSchema = z.object({
   compromissos: z
     .array(
       z.object({
-        descricao: z.string().describe("O combinado, curto e concreto: 'mandar o orçamento da cozinha'"),
+        descricao: z.string().describe("O combinado, curto e concreto, com quem faz como sujeito: 'mandar o orçamento da cozinha'"),
         quando: z
           .string()
           .nullable()
           .describe("Data/hora ISO 8601 com fuso, se a conversa der para saber; senão null"),
-        responsavel: z.enum(["eu", "contato", "ambos"]).describe("'eu' = o dono do WhatsApp"),
+        // "eu" confundia o modelo: numa conversa os dois lados dizem "eu". Quem promete
+        // "vou ler" é o responsável, mesmo que a coisa a ler tenha vindo do dono.
+        quem_faz: z
+          .enum(["dono", "contato", "ambos"])
+          .describe("Quem tem que fazer: 'dono' é o dono do WhatsApp; 'contato' é a outra pessoa. Quem disse 'vou fazer' é quem faz"),
       }),
     )
     .describe("Só compromissos e promessas novos do trecho marcado como NOVO"),
@@ -111,6 +115,7 @@ export interface PedidoAgente {
 const INSTRUCOES_EXTRACAO = `Você lê trechos de conversas do WhatsApp pessoal de uma pessoa (o "dono") para manter a agenda e a memória dela.
 Extraia apenas o que está no trecho marcado como NOVO; o trecho ANTERIOR é só contexto.
 - Compromisso: algo combinado com data ou prazo, ou uma promessa ("te mando amanhã", "passo aí sexta", "a gente se fala semana que vem"). Não invente datas: sem prazo dito, quando = null.
+- Quem faz: veja quem escreveu a promessa. Se o contato escreve "vou ler", "te mando amanhã", "não terminei de ler", quem faz é o contato, ainda que o arquivo tenha sido mandado pelo dono. Só é do dono o que o dono prometeu ou o que pediram a ele e ele aceitou.
 - Em grupos, só compromissos que envolvem o dono diretamente.
 - Fatos: coisas duradouras sobre o contato (quem é, família, trabalho, aniversário, preferências). Nada passageiro ("está no trânsito").
 - Urgente só quando o dono deveria ver hoje; conversa normal não é urgente.
