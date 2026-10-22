@@ -36,11 +36,13 @@ export const ExtracaoSchema = z.object({
   fatos: z
     .array(z.string())
     .describe("Fatos duradouros sobre o contato que valem lembrar (família, trabalho, preferências)"),
-  precisa_resposta: z.boolean().describe("A última mensagem é do contato e espera algo do dono"),
+  precisa_resposta: z
+    .boolean()
+    .describe("As mensagens do contato desde a última do dono esperam algo dele: um pedido, ou um assunto de trabalho em que cabe ele se posicionar"),
   reacao: z
     .boolean()
     .describe(
-      "A última mensagem é do contato e compartilha algo sem pedir nada (foto, vídeo, novidade, conquista, notícia boa) que pede só uma reação curta do dono",
+      "As mensagens do contato desde a última do dono compartilham algo sem pedir nada (foto, presente, vídeo, novidade, conquista, notícia boa) e o dono ainda não reagiu",
     ),
   urgente: z
     .boolean()
@@ -136,8 +138,9 @@ Extraia apenas o que está no trecho marcado como NOVO; o trecho ANTERIOR é só
 - Fatos: coisas duradouras sobre o contato (quem é, família, trabalho, aniversário, preferências). Nada passageiro ("está no trânsito").
 - Urgente só quando o dono deveria ver hoje; conversa normal não é urgente.
 - Aguardando: olhe a conversa inteira (ANTERIOR + NOVO). Se o contato ficou de mandar ou fazer algo para o dono e ainda não fez, descreva; se já entregou ou não há nada, null.
-- Precisa resposta: só se a última mensagem é do contato e pede algo do dono (pergunta, proposta, pedido, convite em aberto). "Ok", "valeu", "disponha", "tá ok", emoji ou fim de assunto não pedem resposta.
-- Reação: a última mensagem é do contato e mostra algo sem pedir nada (foto do produto novo, obra pronta, aprovação saiu, vídeo, notícia boa). Não é "precisa resposta", mas pede um "que legal" do dono. Se o dono já reagiu, não é.
+- Precisa resposta e reação: julgue o BLOCO que o contato mandou depois da última mensagem do dono, não só a última linha. Quem manda várias mensagens seguidas e fecha com uma piada ou "kkk" ainda espera retorno do que disse antes.
+- Precisa resposta: o bloco pede algo do dono (pergunta, proposta, pedido, convite em aberto) ou traz assunto de trabalho em que o dono é parte e cabe ele se posicionar (preocupação com o projeto, notícia da obra, desabafo sobre terceiros, cobrança). "Ok", "valeu", "disponha", "tá ok", emoji ou fim de assunto sozinhos não pedem resposta.
+- Reação: o bloco mostra algo sem pedir nada (foto do produto novo, obra pronta, aprovação saiu, presente, vídeo, notícia boa) e o dono ainda não reagiu. Pede um retorno curto, mesmo que o bloco também precise de resposta.
 - Situação: leia também as mensagens do dono. Uma resposta curta do contato ("sábado eu estaria mais livre") só faz sentido junto com o que o dono disse antes; a situação junta as duas pontas.
 - Se não houver nada, devolva listas vazias.`;
 

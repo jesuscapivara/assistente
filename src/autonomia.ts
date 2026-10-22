@@ -82,7 +82,7 @@ export async function responderSozinho(deps: DepsAutonomia, jid: string): Promis
   const texto = await escreverRascunho(
     deps,
     jid,
-    "Responda a última mensagem do contato, do jeito que o dono responderia. Se precisar de algo que só ele sabe (decisão, valor, data, opinião), deixe [preencher: …]. " +
+    "Responda o que o contato mandou desde a última mensagem do dono (o bloco todo, não só a última linha), do jeito que o dono responderia. Se precisar de algo que só ele sabe (decisão, valor, data, opinião), deixe [preencher: …]. " +
       "Se for foto ou novidade compartilhada, reaja ao que ela mostra de fato (cite o detalhe: o boné, a loja, a aprovação), curto e com a energia do dono; nunca um elogio genérico que serviria para qualquer foto, e não repita a frase de reações anteriores. " +
       "Se não dá para saber o que é (vídeo, arquivo ou foto sem descrição), deixe [preencher: o que achou].",
   );
