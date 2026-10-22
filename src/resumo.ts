@@ -3,6 +3,7 @@ import { eventoEmTexto } from "./ferramentas_google.js";
 import { dataCurta, relogio } from "./formato.js";
 import type { Email, Evento, Google } from "./google.js";
 import type { Ia } from "./ia.js";
+import { diaMes, koreosDoDia, type KoreosDireto, type KoreosDoDia } from "./koreos.js";
 import * as repo from "./repo.js";
 
 export interface DepsResumo {
@@ -11,6 +12,8 @@ export interface DepsResumo {
   dono: string;
   fuso: string;
   google?: Google;
+  /** KoreOS lido direto, sem modelo (tarefas e contas do dia). */
+  koreosDireto?: KoreosDireto;
 }
 
 /** Tudo que o dia tem, já lido do banco, da agenda e do Gmail. Texto e cartão saem daqui. */
@@ -24,6 +27,7 @@ export interface Dia {
   datas: Awaited<ReturnType<typeof repo.datasProximas>>;
   emails: Email[];
   resolvidos: { descricao: string; contato: string; quando: Date }[];
+  koreos: KoreosDoDia | null;
 }
 
 /** Meia-noite de hoje no fuso do dono, como instante. */
@@ -51,6 +55,8 @@ export async function coletarDia(deps: DepsResumo, agora = new Date()): Promise<
   }
   const { dia } = relogio(agora, deps.fuso);
   const [ano, mes, d] = dia.split("-").map(Number);
+  // KoreOS fora do ar não pode segurar o resumo: sai sem a parte dele.
+  const koreos = deps.koreosDireto ? await koreosDoDia(deps.koreosDireto, dia).catch(() => null) : null;
 
   const resolvidos = (
     await deps.db.query<{ descricao: string; contato: string; quando: Date }>(
@@ -75,6 +81,7 @@ export async function coletarDia(deps: DepsResumo, agora = new Date()): Promise<
     datas: await repo.datasProximas(deps.db, { ano, mes, dia: d }, 3),
     emails,
     resolvidos,
+    koreos,
   };
 }
 
@@ -118,6 +125,18 @@ export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: st
     blocos.push("*Promessas sem data*\n" + dia.semData.map((c) => `#${c.id} ${c.descricao} (${c.contato_nome ?? "?"})`).join("\n"));
   }
   if (dia.esperando.length) blocos.push("*Esperando resposta sua*\n" + dia.esperando.map((e) => linhaDeEspera(e, fuso)).join("\n"));
+  const k = dia.koreos;
+  if (k && (k.tarefasHoje.length || k.tarefasAtrasadas.length || k.contasHoje.length || k.contasAtrasadas.length)) {
+    blocos.push(
+      "*No KoreOS*\n" +
+        [
+          ...k.tarefasHoje.map((t) => `• Vence hoje: ${t.titulo} (${t.projeto})`),
+          ...k.tarefasAtrasadas.map((t) => `• Atrasada desde ${diaMes(t.prazo)}: ${t.titulo} (${t.projeto})`),
+          ...k.contasHoje.map((l) => `• ${l.tipo === "RECEITA" ? "Receber" : "Pagar"} hoje: ${l.descricao} — ${l.valor}`),
+          ...k.contasAtrasadas.map((l) => `• ${l.tipo === "RECEITA" ? "A receber" : "A pagar"} desde ${diaMes(l.data)}: ${l.descricao} — ${l.valor}`),
+        ].join("\n"),
+    );
+  }
   if (dia.emails.length) {
     blocos.push("*E-mails não lidos*\n" + dia.emails.map((e) => `• ${remetente(e.de)}: ${e.assunto || "(sem assunto)"}`).join("\n"));
   }

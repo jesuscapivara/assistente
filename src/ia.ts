@@ -73,6 +73,8 @@ export interface EntradaExtracao {
   memoria: string;
   anteriores: string;
   novas: string;
+  /** O que o dono já corrigiu em leituras anteriores; vale acima destas instruções. */
+  licoes?: string;
 }
 
 /**
@@ -161,6 +163,7 @@ export function criarIa(opts: {
         `Agora: ${e.agora}`,
         `Dono: ${e.dono}`,
         `${e.grupo ? "Grupo" : "Contato"}: ${e.contato}`,
+        e.licoes ? `CORREÇÕES QUE O DONO JÁ FEZ EM LEITURAS (valem acima de tudo):\n${e.licoes}` : "",
         e.memoria ? `O que já se sabe:\n${e.memoria}` : "",
         e.anteriores ? `ANTERIOR:\n${e.anteriores}` : "",
         `NOVO:\n${e.novas}`,

@@ -573,6 +573,8 @@ export async function contatosParaConhecer(db: Db, limite: number, minimoMensage
 export interface Perfil {
   regras: { id: number; texto: string }[];
   licoes: { id: number; texto: string }[];
+  /** O que o dono corrigiu na leitura das conversas: vai em toda extração. */
+  leituras: { id: number; texto: string }[];
   gerado: string;
 }
 
@@ -583,12 +585,13 @@ export async function lerPerfil(db: Db): Promise<Perfil> {
   return {
     regras: r.rows.filter((x) => x.tipo === "regra"),
     licoes: r.rows.filter((x) => x.tipo === "licao").slice(-40),
+    leituras: r.rows.filter((x) => x.tipo === "leitura").slice(-30),
     gerado: r.rows.filter((x) => x.tipo === "gerado").at(-1)?.texto ?? "",
   };
 }
 
 /** Acrescenta regra ou lição, sem repetir texto igual. */
-export async function acrescentarPerfil(db: Db, tipo: "regra" | "licao", texto: string): Promise<number | null> {
+export async function acrescentarPerfil(db: Db, tipo: "regra" | "licao" | "leitura", texto: string): Promise<number | null> {
   const t = texto.trim();
   if (!t) return null;
   const dup = await db.query("SELECT 1 FROM perfil WHERE ativo AND tipo = $1 AND lower(texto) = lower($2)", [tipo, t]);
@@ -605,6 +608,12 @@ export async function trocarPerfilGerado(db: Db, texto: string): Promise<void> {
 export async function desativarPerfil(db: Db, id: number): Promise<boolean> {
   const r = await db.query("UPDATE perfil SET ativo = FALSE WHERE id = $1 AND tipo <> 'gerado'", [id]);
   return (r.rowCount ?? 0) > 0;
+}
+
+/** As lições de leitura em texto, para a extração. Vazio quando não há. */
+export async function licoesDeLeitura(db: Db): Promise<string> {
+  const r = await db.query<{ texto: string }>("SELECT texto FROM perfil WHERE ativo AND tipo = 'leitura' ORDER BY id DESC LIMIT 30");
+  return r.rows.map((x) => `- ${x.texto}`).join("\n");
 }
 
 /** O perfil em texto, como entra nos prompts: regra do dono antes de tudo. */

@@ -226,6 +226,24 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     expect(await repo.lerContato(db, JOAO)).toMatchObject({ sistema: true, espera_resposta: false });
   });
 
+  it("errado N corrige o compromisso e a lição vai nas próximas leituras", async () => {
+    await ing(msg(FERNANDA, "não terminei de ler, vou ler hoje", { quando: new Date(Date.now() - 600_000).toISOString() }));
+    const id = (await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "ler o projeto", quando: null, responsavel: "eu" }))!;
+    ia.estruturados.push({
+      compromisso: { acao: "corrigir", descricao: "Fernanda ler o projeto que você mandou", quem_faz: "contato" },
+      conversa: null,
+      licao: "Quem escreve 'vou ler' é quem lê, mesmo que o arquivo tenha vindo do dono.",
+    });
+    await tratarComando(deps, `errado ${id} quem vai ler é ela`);
+    expect(ia.pedidosEstruturados.at(-1)).toMatch(/CORREÇÃO DE LUCAS: quem vai ler é ela[\s\S]*vou ler hoje/);
+    expect((await repo.compromissosAbertos(db)).find((k) => k.id === id)).toMatchObject({ responsavel: "contato", descricao: "Fernanda ler o projeto que você mandou" });
+    expect(avisos.at(-1)).toMatch(/agora é de Fernanda[\s\S]*Aprendi \(#\d+\): Quem escreve 'vou ler'/);
+
+    await ing(msg(FERNANDA, "Pode ser sábado?", { quando: new Date(Date.now() - 300_000).toISOString() }));
+    await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
+    expect(ia.extracoes.at(-1)?.licoes).toMatch(/Quem escreve 'vou ler' é quem lê/);
+  });
+
   it("o pedido livre leva o diálogo recente e o caderno", async () => {
     await repo.registrarFala(db, "assistente", "Posso refazer o resumo com os nomes. Quer?");
     await gravarEstado(db, "caderno", "- propus refazer o resumo com nomes");

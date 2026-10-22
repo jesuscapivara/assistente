@@ -8,6 +8,7 @@ import type { Google } from "./google.js";
 import type { Ia } from "./ia.js";
 import { escreverRascunho, previa, proporResposta } from "./rascunho.js";
 import { relatorioDeCusto } from "./consumo.js";
+import { corrigirLeitura } from "./corrigir.js";
 import { atualizarCaderno, contextoDoChat, lerCaderno, limparCaderno } from "./memoria.js";
 import * as repo from "./repo.js";
 import { montarResumo } from "./resumo.js";
@@ -61,6 +62,7 @@ export type Comando =
   | { tipo: "pausa" }
   | { tipo: "retoma" }
   | { tipo: "custo" }
+  | { tipo: "errado"; id: number; texto: string }
   | { tipo: "caderno"; limpar: boolean }
   | { tipo: "ajuda" }
   | { tipo: "pedido"; texto: string };
@@ -94,6 +96,7 @@ export function lerComando(texto: string): Comando {
   if (/^(pausa|pausar|para tudo)[.!]?$/i.test(t)) return { tipo: "pausa" };
   if (/^(retoma|retomar|volta a responder)[.!]?$/i.test(t)) return { tipo: "retoma" };
   if (/^(custo|gasto|consumo)[.!?]?$/i.test(t)) return { tipo: "custo" };
+  if ((m = t.match(/^errado\s+#?(\d+)[\s:,.-]*([\s\S]*)$/i))) return { tipo: "errado", id: Number(m[1]), texto: m[2].trim() };
   if (/^caderno[.!?]?$/i.test(t)) return { tipo: "caderno", limpar: false };
   if (/^(esquece|limpa)\s+(o\s+)?caderno[.!]?$/i.test(t)) return { tipo: "caderno", limpar: true };
   if (/^(ajuda|help|\?)$/i.test(t)) return { tipo: "ajuda" };
@@ -117,6 +120,8 @@ const AJUDA = `*Comandos*
 • autonomia <nome> <0-3> — 0 só quando você pede · 1 propõe resposta · 2 envia se você não vetar · 3 envia o simples direto
 • veta N — não envia o rascunho N
 • pausa · retoma — desliga e religa todo envio automático
+• errado N <o quê> — corrige o compromisso N e eu aprendo para as próximas ("errado 1 quem vai ler é ele")
+  (para o resto, diga com suas palavras: "a Thaís é notificação do KoreOS", "o João não espera resposta")
 • custo — quanto o assistente gastou com o Claude (hoje, 7 e 30 dias)
 • caderno — o que estou acompanhando entre nós · esquece caderno — zera
 • áudio também vale: fale o pedido
@@ -173,6 +178,9 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
       const r = await montarResumo(deps);
       return deps.avisar(r.texto, r.refs);
     }
+    case "errado":
+      if (!c.texto) return deps.avisar(`Diga o que está errado: errado ${c.id} <o quê>.`);
+      return deps.avisar(await corrigirLeitura(deps, { compromisso: c.id }, c.texto));
     case "custo":
       return deps.avisar(await relatorioDeCusto(deps.db));
     case "caderno": {
@@ -209,6 +217,7 @@ async function mostrarPerfil(deps: DepsControle): Promise<string> {
   const partes = [
     p.regras.length ? `*Suas regras*\n${p.regras.map((r) => `#${r.id} ${r.texto}`).join("\n")}` : "*Suas regras*\nnenhuma ainda (regra <texto>)",
     p.licoes.length ? `*O que aprendi com as suas correções*\n${p.licoes.map((r) => `#${r.id} ${r.texto}`).join("\n")}` : "",
+    p.leituras.length ? `*O que aprendi lendo as conversas*\n${p.leituras.map((r) => `#${r.id} ${r.texto}`).join("\n")}` : "",
     p.gerado ? `*Seu retrato*\n${p.gerado}` : "Ainda não tenho mensagens suficientes suas para um retrato (estuda força).",
   ];
   return partes.filter(Boolean).join("\n\n") + "\n\n_esquece N apaga uma regra ou lição_";
@@ -395,6 +404,7 @@ function sistemaAgente(dono: string, perfil: string, extras: string[]): string {
 - Se ele disser como prefere as coisas ("nunca marco antes das 9", "com cliente sempre formal"), guarde com registrar_regra.
 - Mensagem curta ("sim", "pode", "esse", "o segundo", "faz isso") responde ao que está na CONVERSA RECENTE e no CADERNO: resolva por eles e aja. Só pergunte se de fato houver duas leituras.
 - Contato sem nome: diga quem é pelo que a ficha e a conversa mostram ("o cliente da obra do Largo"), nunca só o número.
+- Se ele disser que algo que você entendeu está errado (um compromisso, quem espera resposta, a situação de uma conversa, alguém que é robô), use corrigir_leitura: corrige e ensina a leitura das próximas.
 - Se não achar a informação, diga que não achou. Não invente.${extras.map((e) => `\n- ${e}`).join("")}${perfil ? `\n\nPERFIL DE ${dono.toUpperCase()}:\n${perfil}` : ""}`;
 }
 
@@ -534,6 +544,21 @@ export function criarFerramentas(deps: DepsControle) {
         if (!contato) return "Conversa não encontrada: ache o jid com buscar_contato.";
         await repo.lembrar(db, contato.jid, [fato]);
         return "Guardado.";
+      },
+    }),
+    betaZodTool({
+      name: "corrigir_leitura",
+      description:
+        "Corrige algo que o assistente entendeu errado numa conversa (compromisso pelo número, ou a conversa pelo jid: situação, se espera resposta, se é robô) e guarda a lição para as próximas leituras.",
+      inputSchema: z.object({
+        compromisso: z.number().int().nullable().describe("Número do compromisso (#N), se a correção é sobre um"),
+        jid: z.string().nullable().describe("A conversa, se a correção é sobre ela (ache com buscar_contato)"),
+        correcao: z.string().describe("O que ele disse que está errado, nas palavras dele"),
+      }),
+      run: async ({ compromisso, jid, correcao }) => {
+        if (compromisso != null) return corrigirLeitura(deps, { compromisso }, correcao);
+        if (jid) return corrigirLeitura(deps, { jid }, correcao);
+        return "Diga o número do compromisso ou ache a conversa com buscar_contato.";
       },
     }),
     betaZodTool({

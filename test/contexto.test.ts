@@ -7,6 +7,7 @@ import { guardarImagem, lerImagem } from "../src/midia.js";
 import { nomeDe } from "../src/repo.js";
 import type { Dia } from "../src/resumo.js";
 import { resumoEmTexto } from "../src/resumo.js";
+import { koreosDoDia, resultadoDoMcp } from "../src/koreos.js";
 import { lerAgenda } from "../src/whatsapp/evolution.js";
 import { lerHistorico } from "../src/whatsapp/evento.js";
 
@@ -14,7 +15,7 @@ const SP = "America/Sao_Paulo";
 const em = (h: number, m = 0) => new Date(Date.UTC(2026, 9, 22, h + 3, m));
 
 function diaVazio(): Dia {
-  return { agora: em(7, 30), eventosHoje: [], eventosAmanha: [], comData: [], semData: [], esperando: [], datas: [], emails: [], resolvidos: [] };
+  return { agora: em(7, 30), eventosHoje: [], eventosAmanha: [], comData: [], semData: [], esperando: [], datas: [], emails: [], resolvidos: [], koreos: null };
 }
 
 describe("filtro sem modelo", () => {
@@ -161,5 +162,50 @@ describe("cartão", () => {
     const id = guardarImagem(Buffer.from("x"), 0);
     expect(lerImagem(id, 1000)?.toString()).toBe("x");
     expect(lerImagem(id, 16 * 60_000)).toBeNull();
+  });
+});
+
+describe("KoreOS direto, sem modelo", () => {
+  it("lê o resultado do MCP em JSON ou em SSE, e erro vira exceção", () => {
+    const rpc = { jsonrpc: "2.0", id: 1, result: { structuredContent: { tasks: [] }, content: [] } };
+    expect(resultadoDoMcp(JSON.stringify(rpc))).toEqual({ tasks: [] });
+    expect(resultadoDoMcp(`event: message\ndata: ${JSON.stringify(rpc)}\n\n`)).toEqual({ tasks: [] });
+    expect(resultadoDoMcp(JSON.stringify({ result: { content: [{ type: "text", text: '{"count":0}' }] } }))).toEqual({ count: 0 });
+    expect(() => resultadoDoMcp(JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "sem permissão" }] } }))).toThrow(/sem permissão/);
+  });
+
+  it("atrasada é conferida pelo prazo: o KoreOS devolveu tarefa de novembro como atrasada", async () => {
+    const chamadas: string[] = [];
+    const k = {
+      async chamar(f: string, a: Record<string, unknown>) {
+        chamadas.push(`${f}:${a.period}`);
+        if (f === "tasks_list_mine" && a.period === "atrasadas") {
+          return {
+            tasks: [
+              { titulo: "Elétrico", projeto: "Clínica", prazo: "2026-10-09" },
+              { titulo: "Hidrossanitário", projeto: "Comercial", prazo: "2026-11-11" },
+            ],
+          };
+        }
+        if (f === "finance_search_transactions" && a.period === "vencimento_hoje") {
+          return { transactions: [{ tipo: "DESPESA", descricao: "Plotagem", valor: "R$ 367,49", data: "2026-10-22" }] };
+        }
+        return {};
+      },
+    };
+    const d = await koreosDoDia(k, "2026-10-22");
+    expect(d.tarefasAtrasadas.map((t) => t.titulo)).toEqual(["Elétrico"]);
+    expect(d.contasHoje).toEqual([{ tipo: "DESPESA", descricao: "Plotagem", valor: "R$ 367,49", data: "2026-10-22" }]);
+    expect(chamadas).toHaveLength(4);
+
+    const dia = diaVazio();
+    dia.koreos = d;
+    const { texto } = resumoEmTexto(dia, "Lucas", SP);
+    expect(texto).toMatch(/\*No KoreOS\*\n• Atrasada desde 09\/10: Elétrico \(Clínica\)\n• Pagar hoje: Plotagem — R\$ 367,49/);
+  });
+
+  it("errado N é comando", () => {
+    expect(lerComando("errado 1 quem vai ler é o Toshio")).toEqual({ tipo: "errado", id: 1, texto: "quem vai ler é o Toshio" });
+    expect(lerComando("errado #3")).toEqual({ tipo: "errado", id: 3, texto: "" });
   });
 });

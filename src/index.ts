@@ -7,6 +7,7 @@ import { registrarUso } from "./consumo.js";
 import { NIVEIS, tratarComando, type DepsControle } from "./controle.js";
 import { abrirDb, migrar } from "./db.js";
 import { lerSituacoesPendentes, rodadaDeExtracao } from "./extracao.js";
+import { criarKoreosDireto } from "./koreos.js";
 import { guardarImagem } from "./midia.js";
 import { criarGoogle } from "./google.js";
 import { criarIa } from "./ia.js";
@@ -55,7 +56,9 @@ async function avisar(texto: string, refs = ""): Promise<void> {
 }
 
 const log = (o: object, t: string) => app.log.warn(o, t);
-const base = { db, ia, dono: cfg.DONO_NOME, fuso: cfg.FUSO, avisar, google, log };
+// O mesmo token MCP, chamado direto (sem o Claude) para as tarefas e contas do resumo.
+const koreosDireto = koreos ? criarKoreosDireto(koreos.url, koreos.token) : undefined;
+const base = { db, ia, dono: cfg.DONO_NOME, fuso: cfg.FUSO, avisar, google, koreosDireto, log };
 
 /**
  * O resumo da manhã: o cartão em imagem, com o essencial e os #N na legenda (é por eles

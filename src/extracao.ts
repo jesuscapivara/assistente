@@ -104,6 +104,7 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
     contato: nome,
     grupo: contato.grupo,
     memoria: repo.fichaEmTexto(contato),
+    licoes: await repo.licoesDeLeitura(db),
     anteriores: linhas(anteriores, deps.dono, nome, deps.fuso),
     novas: linhas(novas, deps.dono, nome, deps.fuso),
   });
@@ -184,6 +185,7 @@ export async function lerSituacoesPendentes(deps: DepsExtracao, limite = 40): Pr
         contato: nome,
         grupo: false,
         memoria: repo.fichaEmTexto(contato),
+        licoes: await repo.licoesDeLeitura(deps.db),
         anteriores: linhas(msgs.slice(0, -1), deps.dono, nome, deps.fuso),
         novas: linhas([ultima], deps.dono, nome, deps.fuso),
       });

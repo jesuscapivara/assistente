@@ -42,6 +42,11 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
   (banco, notificação do KoreOS) não entra, e quem você respondeu pelo celular sai na hora.
 - O chat de controle tem memória: as últimas falas dos dois lados e um **caderno** curto do que
   está em andamento entre vocês. Um "sim" responde ao que ele acabou de propor.
+- Aprende com as suas correções de leitura: cada `errado N` (ou "isso está errado" no chat)
+  corrige o item e vira uma lição geral que vai em toda leitura seguinte. Elas aparecem em
+  `perfil` e saem com `esquece N`.
+- O resumo traz o KoreOS: suas tarefas que vencem hoje ou estão atrasadas e as contas do dia,
+  lidas direto pelo MCP, sem passar pelo Claude.
 - Contato sem nome aparece pelo que se sabe dele, nunca como número de LID. Os nomes da agenda
   do celular vêm da Evolution na subida e toda madrugada.
 
@@ -78,6 +83,7 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `perfil` · `regra nunca marco nada antes das 9` · `esquece 4` | o que ele sabe de você |
 | `estuda` | atualiza agora as fichas e o seu retrato |
 | `fora Grupo da Família` · `volta Grupo da Família` | tira (e apaga) ou devolve uma conversa |
+| `errado 1 quem vai ler é ele` | corrige o compromisso 1 e aprende para as próximas leituras; para o resto, diga com suas palavras ("a Thaís é notificação do KoreOS") |
 | `custo` | gasto com o Claude hoje, em 7 e em 30 dias, e por função |
 | `caderno` · `esquece caderno` | o que ele está acompanhando entre vocês; zera |
 | `resumo` · `ajuda` | |
@@ -132,9 +138,28 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   `127.0.0.1:3100` da VM: acesse por túnel (`ssh -L 3100:127.0.0.1:3100 vm` e abra
   `http://localhost:3100/painel/<PAINEL_TOKEN>`) ou ponha atrás do proxy da VM com HTTPS.
 
+### Backup
+
+O serviço `backup` do compose faz um dump do banco na subida e todo dia às 03:30, em
+`./backups`, por 14 dias. Fica na mesma VM: protege de migração errada e de apagar dado sem
+querer, não de perder o disco. Restaurar:
+`gunzip -c backups/<arquivo>.sql.gz | docker compose exec -T db psql -U assistente assistente`.
+
 ### Atualizar
 
-`git pull && docker compose up -d --build`. As migrações do banco rodam sozinhas na subida.
+A VM (`koreos-vps`, em `/root/assistente`) não tem credencial do GitHub e roda a API de
+produção do KoreOS com 2 CPUs. Por isso o código vai por pacote do git e a imagem é montada
+fora dela:
+
+```bash
+git bundle create /tmp/a.bundle <commit-da-vm>..HEAD && scp /tmp/a.bundle koreos-vps:/tmp/
+ssh koreos-vps "cd /root/assistente && git fetch /tmp/a.bundle HEAD && git merge --ff-only FETCH_HEAD"
+git archive HEAD | tar -x -C /tmp/ctx && docker build -t assistente-assistente:latest /tmp/ctx
+docker save assistente-assistente:latest | gzip -1 | ssh koreos-vps docker load
+ssh koreos-vps "cd /root/assistente && docker compose up -d --no-build"
+```
+
+As migrações do banco rodam sozinhas na subida.
 
 ## Desenvolvimento
 

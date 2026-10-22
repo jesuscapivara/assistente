@@ -21,7 +21,13 @@ const dia: Dia = {
   ],
   datas: [{ jid: "z", nome: "Carla Mendes", descricao: "aniversário", mes: 10, dia: 23, faltam: 1 }],
   emails: [],
-  resolvidos: [{ descricao: "resposta enviada", contato: "João Prado", quando: em(-14) }],
+  resolvidos: [{ descricao: "Resposta enviada", contato: "João Prado", quando: em(-14) }],
+  koreos: {
+    tarefasHoje: [{ titulo: "Memorial descritivo", projeto: "Casa Jardins", prazo: "2026-10-22", status: "em andamento", prioridade: "alta" }],
+    tarefasAtrasadas: [{ titulo: "Projeto elétrico", projeto: "Clínica Centro", prazo: "2026-10-09", status: "em andamento", prioridade: "media" }],
+    contasHoje: [],
+    contasAtrasadas: [],
+  },
 };
 
 const plano = await planoDoCartao(null, dia, "Lucas", fuso);

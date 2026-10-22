@@ -6,6 +6,7 @@ import satori from "satori";
 import { z } from "zod";
 import { dataCurta, relogio } from "./formato.js";
 import type { Ia } from "./ia.js";
+import { diaMes } from "./koreos.js";
 import { diaPorExtenso, remetente, type Dia } from "./resumo.js";
 
 /**
@@ -65,6 +66,15 @@ function itensComRef(dia: Dia, fuso: string): { texto: string; refs: Map<string,
     add(`W${i + 1}`, `[WhatsApp, espera resposta desde ${dataCurta(new Date(e.quando), fuso)}] ${e.nome}: ${e.situacao || `"${e.ultima.slice(0, 160)}"`}`),
   );
   dia.emails.forEach((e, i) => add(`M${i + 1}`, `[e-mail não lido] de ${remetente(e.de)}: ${e.assunto} — ${e.trecho.slice(0, 160)}`));
+  const k = dia.koreos;
+  k?.tarefasHoje.forEach((t, i) => add(`T${i + 1}`, `[KoreOS, tarefa do dono que vence hoje] ${t.titulo} — projeto ${t.projeto} (${t.status}, prioridade ${t.prioridade})`));
+  k?.tarefasAtrasadas.forEach((t, i) =>
+    add(`TA${i + 1}`, `[KoreOS, tarefa do dono atrasada desde ${diaMes(t.prazo)}] ${t.titulo} — projeto ${t.projeto} (${t.status}, prioridade ${t.prioridade})`),
+  );
+  k?.contasHoje.forEach((l, i) => add(`F${i + 1}`, `[KoreOS, ${l.tipo === "RECEITA" ? "a receber" : "a pagar"} hoje] ${l.descricao} — ${l.valor}`));
+  k?.contasAtrasadas.forEach((l, i) =>
+    add(`FA${i + 1}`, `[KoreOS, ${l.tipo === "RECEITA" ? "a receber" : "a pagar"} vencido em ${diaMes(l.data)}] ${l.descricao} — ${l.valor}`),
+  );
   dia.datas.forEach((d, i) => add(`D${i + 1}`, `[data] ${d.faltam === 0 ? "hoje" : `em ${d.faltam} dias`}: ${d.descricao} — ${d.nome}`));
   dia.resolvidos.forEach((r, i) => add(`R${i + 1}`, `[resolvido ${dataCurta(new Date(r.quando), fuso)}] ${r.descricao} — ${r.contato}`));
   return { texto: linhas.join("\n"), refs };
@@ -85,7 +95,12 @@ function planoSemModelo(dia: Dia, dono: string, fuso: string): Plano {
     return { faixa: b.faixa, frase: evs.length ? evs.map((e) => `${hora(e.inicio, fuso)} ${e.titulo}`).join(" · ") : "Livre." };
   });
   const precisa = [
+    ...(dia.koreos?.tarefasHoje ?? []).map((t, i) => ({ ref: `T${i + 1}`, titulo: t.titulo, frase: `Tarefa do projeto ${t.projeto} no KoreOS, prazo hoje.` })),
+    ...(dia.koreos?.contasHoje ?? []).map((l, i) => ({ ref: `F${i + 1}`, titulo: `${l.tipo === "RECEITA" ? "Receber" : "Pagar"} ${l.valor}`, frase: `${l.descricao}, vence hoje no KoreOS.` })),
     ...dia.comData.filter((c) => c.responsavel !== "contato").map((c) => ({ ref: `#${c.id}`, titulo: c.descricao, frase: `Combinado com ${c.contato_nome ?? "?"}, ${dataCurta(new Date(c.quando!), fuso)}.` })),
+    ...((dia.koreos?.tarefasAtrasadas.length ?? 0) > 0
+      ? [{ ref: "TA1", titulo: dia.koreos!.tarefasAtrasadas.length === 1 ? "1 tarefa atrasada no KoreOS" : `${dia.koreos!.tarefasAtrasadas.length} tarefas atrasadas no KoreOS`, frase: dia.koreos!.tarefasAtrasadas.slice(0, 3).map((t) => `${t.titulo} (${t.projeto})`).join("; ") + "." }]
+      : []),
     ...dia.esperando.map((e, i) => ({ ref: `W${i + 1}`, titulo: `${e.nome} espera resposta`, frase: e.situacao || `"${e.ultima.slice(0, 120)}"` })),
   ].slice(0, 6);
   const resolvido = dia.resolvidos.slice(0, 4).map((r, i) => ({ ref: `R${i + 1}`, frase: `${r.descricao} — ${r.contato}.` }));
@@ -101,7 +116,8 @@ export async function planoDoCartao(ia: Ia | null, dia: Dia, dono: string, fuso:
       sistema: `Você escreve o resumo da manhã de ${dono}, para ele olhar em 30 segundos com o café.
 - manchete: uma frase só. Dia cheio, normal ou livre se vê pela agenda de hoje.
 - atos: três blocos de horário cobrindo o dia, cada um com uma frase específica da agenda. Dia calmo: frase curta, sem enchimento.
-- precisa: o que custa ignorar até amanhã (alguém travado esperando ele, prazo hoje, preparação para algo de amanhã). Título nas palavras dele; a frase diz de onde vem (WhatsApp, e-mail, agenda, quem, quando) e o que querem.
+- precisa: o que custa ignorar até amanhã (alguém travado esperando ele, prazo hoje, preparação para algo de amanhã). Título nas palavras dele; a frase diz de onde vem (WhatsApp, e-mail, agenda, KoreOS, quem, quando) e o que querem.
+- Tarefas atrasadas do KoreOS: junte num item só ("5 tarefas atrasadas no KoreOS", citando as de prioridade alta), a não ser que uma delas seja de fato o assunto do dia.
 - resolvido: só o que veio marcado como resolvido.
 - Use só os itens abaixo, citando o ref exato. Não invente nada.
 ${VOZ}`,

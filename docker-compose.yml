@@ -35,6 +35,37 @@ services:
       retries: 10
     networks: [interna]
 
+  # Dump do banco toda madrugada (03:30 no fuso do dono) e um na subida, guardados em
+  # ./backups por 14 dias. Fichas, perfil e lições não estão em lugar nenhum além daqui.
+  # Restaurar: gunzip -c backups/<arquivo>.sql.gz | docker compose exec -T db psql -U assistente assistente
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${FUSO:-America/Sao_Paulo}
+    volumes:
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /usr/local/bin/dump <<'FIM'
+        #!/bin/sh
+        set -e
+        arq=/backups/assistente-$$(date +%Y-%m-%d_%H%M).sql.gz
+        pg_dump -h db -U assistente assistente | gzip > "$$arq.tmp" && mv "$$arq.tmp" "$$arq"
+        find /backups -name 'assistente-*.sql.gz' -mtime +14 -delete
+        echo "backup ok: $$arq"
+        FIM
+        chmod +x /usr/local/bin/dump
+        dump
+        echo '30 3 * * * /usr/local/bin/dump' | crontab -
+        exec crond -f -l 8
+    networks: [interna]
+
 volumes:
   dados:
 
