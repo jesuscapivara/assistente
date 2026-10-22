@@ -366,6 +366,9 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     ia.rascunho = "Imagina! 😊";
     expect(await responderSozinho(auto, FERNANDA)).toBe("enviado");
     expect(whats.enviadas[0]).toEqual({ destino: FERNANDA, texto: "Imagina! 😊" });
+    // O envio fica na conversa (a Evolution não devolve o eco): o próximo rascunho o vê.
+    const ultima = (await repo.ultimasMensagens(db, FERNANDA, 1))[0];
+    expect(ultima).toMatchObject({ de_mim: true, texto: "Imagina! 😊" });
 
     await ing(msg(FERNANDA, "boa noite!"));
     agora = new Date("2026-10-23T05:00:00Z"); // 02h em SP

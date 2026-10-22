@@ -314,11 +314,31 @@ export async function executarEnvio(
   const reservado = await repo.reservarEnvio(deps.db, r.id, auto);
   if (!reservado) return false;
   try {
-    // Volta pelo webhook como mensagem "de mim" na conversa do contato, e é gravada
-    // ali como qualquer outra: entra no contexto da conversa.
     const mensagemId = await deps.evolution.enviarTexto(reservado.chat_jid, reservado.texto);
     // O id separa esta mensagem das que ele escreveu à mão: só as dele ensinam estilo.
     if (mensagemId) await deps.db.query("UPDATE rascunhos SET mensagem_id = $2 WHERE id = $1", [r.id, mensagemId]);
+    // A Evolution GO não devolve pelo webhook o que a API envia: sem gravar aqui, a
+    // conversa não tem a resposta, e o próximo rascunho agradece de novo o que já foi
+    // agradecido. Se o eco vier, o mesmo id não duplica.
+    await repo.gravarMensagem(
+      deps.db,
+      {
+        id: mensagemId || `rascunho-${r.id}`,
+        chatJid: reservado.chat_jid,
+        remetenteJid: null,
+        remetenteNome: null,
+        deMim: true,
+        grupo: false,
+        tipo: "texto",
+        texto: reservado.texto,
+        enviadaEm: new Date(),
+        bruto: {},
+        jidAlternativo: null,
+      },
+      reservado.texto,
+      true,
+    );
+    await repo.donoRespondeu(deps.db, reservado.chat_jid);
   } catch (err) {
     await deps.db.query("UPDATE rascunhos SET status = 'aguardando', decidido_em = NULL, enviar_em = NULL WHERE id = $1", [r.id]);
     // Sem resposta a tempo, a mensagem pode ter saído: o dono confere antes de repetir.
