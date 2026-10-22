@@ -50,7 +50,7 @@ const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, 
 class IaFalsa implements Ia {
   extracao: Extracao = vazio;
   rascunho = "Combinado, quinta às 15h então!";
-  risco: { risco: "baixo" | "alto"; motivo: string } = { risco: "baixo", motivo: "resposta simples" };
+  risco: { risco: "baixo" | "alto"; motivo: string; sem_resposta?: string[] } = { risco: "baixo", motivo: "resposta simples" };
   escritos: { sistema: string; conteudo: string }[] = [];
   async extrair(_e: EntradaExtracao) {
     return this.extracao;
@@ -357,6 +357,13 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
 
     ia.rascunho = "Te confirmo [preencher: horário].";
     expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+    await tratarComando(deps, "descarta");
+
+    // Resposta "segura" que só pula o assunto de trabalho também espera o dono.
+    ia.rascunho = "Ficou linda a camisa! Que o alvará saia logo, se Deus quiser";
+    ia.risco = { risco: "baixo", motivo: "resposta simples", sem_resposta: ["os projetistas não entregarem o executivo"] };
+    expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+    expect(avisos.at(-1)).toMatch(/precisa de você: não responde: os projetistas não entregarem o executivo/);
     expect(whats.enviadas).toHaveLength(0);
   });
 

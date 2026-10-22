@@ -42,6 +42,11 @@ export function riscoPorPalavra(texto: string): string | null {
 const RiscoSchema = z.object({
   risco: z.enum(["baixo", "alto"]),
   motivo: z.string().describe("Curto: por que é alto, ou 'resposta simples'"),
+  sem_resposta: z
+    .array(z.string())
+    .describe(
+      "Assuntos das mensagens do contato desde a última do dono que pedem posição do dono (pergunta, pedido, problema, notícia de trabalho) e que a resposta proposta não trata de verdade. Em poucas palavras cada; vazio se a resposta cobre tudo",
+    ),
 });
 
 /** Horas em que mensagem automática pode sair: ninguém recebe "resposta do dono" às 3h. */
@@ -60,6 +65,7 @@ async function classificar(deps: DepsAutonomia, conversa: string, texto: string)
   const r = await deps.ia
     .estruturar(RiscoSchema, {
       sistema: `Você decide se uma resposta de WhatsApp pode sair sem o dono (${deps.dono}) revisar.
+Antes do risco, confira a cobertura: liste em sem_resposta cada assunto que o contato trouxe desde a última mensagem do dono e que pede posição dele, se a resposta proposta passa por cima ("se Deus quiser", "vamos ver", um elogio que ignora a pergunta). Responder só a parte social de um bloco que também tem trabalho é deixar o trabalho sem resposta.
 Baixo risco: confirmar recebimento, horário já combinado, agradecer, cumprimento, "vejo e te falo", resposta factual sem compromisso novo, e reagir a foto ou novidade que a pessoa compartilhou ("ficou top!", "parabéns!") sem prometer nada.
 Alto risco: qualquer compromisso novo, dinheiro, prazo, opinião técnica, negociação, reclamação, assunto pessoal ou delicado, ou se o rascunho pode estar errado sobre algo. Na dúvida, alto.`,
       conteudo: `CONVERSA:\n${conversa}\n\nRESPOSTA PROPOSTA:\n${texto}`,
@@ -68,7 +74,12 @@ Alto risco: qualquer compromisso novo, dinheiro, prazo, opinião técnica, negoc
       funcao: "risco",
     })
     .catch(() => null);
-  return r ?? { risco: "alto", motivo: "não consegui avaliar" };
+  if (!r) return { risco: "alto", motivo: "não consegui avaliar" };
+  // Resposta que pula um assunto não sai sozinha: depois do envio a conversa sai das
+  // pendências, e o assunto pulado sumiria sem o dono ver.
+  const pulados = (r.sem_resposta ?? []).filter((s) => s.trim());
+  if (pulados.length) return { risco: "alto", motivo: `não responde: ${pulados.join("; ")}` };
+  return { risco: r.risco, motivo: r.motivo };
 }
 
 /**
