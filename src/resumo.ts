@@ -1,5 +1,7 @@
 import type { Db } from "./db.js";
-import { agoraPorExtenso, dataCurta } from "./formato.js";
+import { eventoEmTexto } from "./ferramentas_google.js";
+import { agoraPorExtenso, dataCurta, relogio } from "./formato.js";
+import type { Google } from "./google.js";
 import type { Ia } from "./ia.js";
 import * as repo from "./repo.js";
 
@@ -8,6 +10,7 @@ export interface DepsResumo {
   ia: Ia;
   dono: string;
   fuso: string;
+  google?: Google;
 }
 
 /** Os dados do resumo, já em texto. Também é o resumo quando o Claude não responde. */
@@ -17,6 +20,20 @@ export async function dadosDoResumo(deps: DepsResumo, agora = new Date()): Promi
   const esperando = await repo.esperandoResposta(deps.db, 4);
 
   const blocos: string[] = [];
+  if (deps.google) {
+    const fimDoDia = new Date(agora.getTime() + 24 * 3600_000);
+    const evs = await deps.google.eventos(agora, fimDoDia).catch(() => []);
+    if (evs.length) blocos.push(`*Na agenda*\n${evs.map((e) => eventoEmTexto(e, deps.fuso)).join("\n")}`);
+  }
+  const { dia } = relogio(agora, deps.fuso);
+  const [ano, mes, d] = dia.split("-").map(Number);
+  const datas = await repo.datasProximas(deps.db, { ano, mes, dia: d }, 3);
+  if (datas.length) {
+    blocos.push(
+      "*Datas*\n" +
+        datas.map((x) => `🎂 ${x.faltam === 0 ? "hoje" : x.faltam === 1 ? "amanhã" : `em ${x.faltam} dias`}: ${x.descricao} — ${x.nome}`).join("\n"),
+    );
+  }
   const comData = compromissos.filter((c) => c.quando);
   const semData = compromissos.filter((c) => !c.quando && c.responsavel !== "contato");
   if (comData.length) {

@@ -11,6 +11,8 @@ export interface DepsExtracao {
   quietoMin: number;
   /** Aviso no canal de controle. */
   avisar(texto: string): Promise<void>;
+  /** Conversa individual em que o contato espera algo do dono (autonomia decide o que fazer). */
+  aoPrecisarResposta?(jid: string): Promise<void>;
   agora?: () => Date;
   log?: (o: object, txt: string) => void;
 }
@@ -91,8 +93,21 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
     }
   }
   // Fato de grupo é de quem falou, e o grupo não é uma pessoa: memória só para conversa individual.
-  if (!contato.grupo) await repo.lembrar(db, jid, r.fatos);
+  if (!contato.grupo) {
+    await repo.lembrar(db, jid, r.fatos);
+    await repo.atualizarAguardando(db, jid, r.aguardando);
+  }
   await repo.marcarExtraidas(db, jid, ate);
+
+  // Urgência não espera o resumo da manhã. Uma vez por mensagem, e só se a última
+  // palavra for do outro: se o dono já respondeu, ele já viu.
+  const ultima = novas[novas.length - 1];
+  if (r.urgente && !ultima.de_mim && (await repo.alertaNovo(db, `urgente:${ultima.id}`))) {
+    await deps.avisar(`⚡ *${nome}*${contato.grupo ? " (grupo)" : ""}: ${r.motivo_urgencia || "pede atenção"}\n> ${ultima.texto.slice(0, 300)}`);
+  }
+  if (r.precisa_resposta && !contato.grupo && !ultima.de_mim && deps.aoPrecisarResposta) {
+    await deps.aoPrecisarResposta(jid);
+  }
 
   if (avisos.length) {
     await deps.avisar(

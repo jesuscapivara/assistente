@@ -19,7 +19,10 @@ const FichaSchema = z.object({
     .string()
     .describe("Como o dono escreve para ela: formal ou não, apelidos, emojis, tamanho das mensagens, como cumprimenta"),
   assuntos_abertos: z.string().describe("O que está pendente entre os dois agora, curto; vazio se nada"),
-  fatos: z.array(z.string()).describe("Fatos duradouros novos (família, trabalho, datas, preferências)"),
+  fatos: z.array(z.string()).describe("Fatos duradouros novos (família, trabalho, preferências)"),
+  datas: z
+    .array(z.object({ descricao: z.string(), dia: z.number().int(), mes: z.number().int() }))
+    .describe("Datas que se repetem todo ano e aparecem na conversa: aniversário, casamento. Só com dia e mês certos"),
 });
 
 /**
@@ -48,7 +51,10 @@ Para grupo: resumo = do que se trata e qual o papel de ${deps.dono} nele; tom = 
   });
   if (!ficha) return false;
   await repo.atualizarFicha(deps.db, jid, ficha);
-  if (!contato.grupo) await repo.lembrar(deps.db, jid, ficha.fatos);
+  if (!contato.grupo) {
+    await repo.lembrar(deps.db, jid, ficha.fatos);
+    await repo.gravarDatas(deps.db, jid, ficha.datas ?? []);
+  }
   return true;
 }
 

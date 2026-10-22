@@ -12,9 +12,12 @@ export interface Contato {
   resumo: string;
   tom: string;
   assuntos_abertos: string;
+  aguardando: string;
+  autonomia: number | null;
 }
 
-const COLUNAS_CONTATO = "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos";
+const COLUNAS_CONTATO =
+  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia";
 
 export interface Mensagem {
   id: string;
@@ -179,7 +182,8 @@ export async function lerContato(db: Db, jid: string): Promise<Contato | null> {
 /** Busca por nome (ou trecho do número), nos dois nomes que o contato pode ter. */
 export async function buscarContatos(db: Db, termo: string, limite = 8): Promise<Contato[]> {
   const r = await db.query<Contato>(
-    `SELECT c.jid, c.nome, c.nome_push, c.grupo, c.excluido, c.memoria, c.relacao, c.resumo, c.tom, c.assuntos_abertos
+    `SELECT c.jid, c.nome, c.nome_push, c.grupo, c.excluido, c.memoria, c.relacao, c.resumo, c.tom, c.assuntos_abertos,
+            c.aguardando, c.autonomia
      FROM contatos c
      LEFT JOIN LATERAL (SELECT max(enviada_em) AS ultima FROM mensagens WHERE chat_jid = c.jid) u ON TRUE
      WHERE c.nome ILIKE $1 OR c.nome_push ILIKE $1 OR c.jid ILIKE $1
@@ -438,8 +442,118 @@ export function fichaEmTexto(c: Contato): string {
     c.resumo ? `Quem é: ${c.resumo}` : "",
     c.tom ? `Como o dono fala com essa pessoa: ${c.tom}` : "",
     c.assuntos_abertos ? `Assuntos em aberto: ${c.assuntos_abertos}` : "",
+    c.aguardando ? `O dono está esperando dela: ${c.aguardando}` : "",
     c.memoria ? `Fatos:\n${c.memoria}` : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Atualiza o que o dono espera do contato; a data só muda quando o assunto muda. */
+export async function atualizarAguardando(db: Db, jid: string, aguardando: string | null): Promise<void> {
+  const novo = (aguardando ?? "").trim();
+  await db.query(
+    `UPDATE contatos SET
+       aguardando_desde = CASE WHEN $2 = '' THEN NULL WHEN aguardando = $2 THEN aguardando_desde ELSE now() END,
+       cobrado_em = CASE WHEN aguardando = $2 THEN cobrado_em ELSE NULL END,
+       aguardando = $2
+     WHERE jid = $1`,
+    [jid, novo],
+  );
+}
+
+/** Quem ficou de mandar algo há `dias` dias e ainda não foi cobrado desde então. */
+export async function paraCobrar(db: Db, dias: number): Promise<(Contato & { aguardando_desde: Date })[]> {
+  const r = await db.query<Contato & { aguardando_desde: Date }>(
+    `SELECT ${COLUNAS_CONTATO}, aguardando_desde FROM contatos
+     WHERE NOT excluido AND NOT grupo AND aguardando <> '' AND aguardando_desde < now() - make_interval(days => $1)
+       AND (cobrado_em IS NULL OR cobrado_em < aguardando_desde)
+     ORDER BY aguardando_desde`,
+    [dias],
+  );
+  return r.rows;
+}
+
+export async function marcarCobrado(db: Db, jid: string): Promise<void> {
+  await db.query("UPDATE contatos SET cobrado_em = now() WHERE jid = $1", [jid]);
+}
+
+/** Aviso ainda não dado? Grava e devolve true; já dado, false. Uma chave por aviso. */
+export async function alertaNovo(db: Db, chave: string): Promise<boolean> {
+  const r = await db.query("INSERT INTO alertas (chave) VALUES ($1) ON CONFLICT DO NOTHING", [chave]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+export async function gravarDatas(db: Db, jid: string, datas: { descricao: string; mes: number; dia: number }[]): Promise<void> {
+  for (const d of datas) {
+    if (!(d.mes >= 1 && d.mes <= 12 && d.dia >= 1 && d.dia <= 31)) continue;
+    await db.query(
+      `INSERT INTO datas (chat_jid, descricao, mes, dia) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (chat_jid, mes, dia) DO UPDATE SET descricao = EXCLUDED.descricao`,
+      [jid, d.descricao, d.mes, d.dia],
+    );
+  }
+}
+
+/** Datas dos próximos `dias` dias (virando o ano), a partir de `hoje` no fuso do dono. */
+export async function datasProximas(
+  db: Db,
+  hoje: { mes: number; dia: number; ano: number },
+  dias: number,
+): Promise<{ jid: string; nome: string; descricao: string; mes: number; dia: number; faltam: number }[]> {
+  const r = await db.query<{ jid: string; nome: string; descricao: string; mes: number; dia: number }>(
+    `SELECT d.chat_jid AS jid, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome, d.descricao, d.mes, d.dia
+     FROM datas d JOIN contatos c ON c.jid = d.chat_jid WHERE NOT c.excluido`,
+  );
+  const base = Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia);
+  return r.rows
+    .map((x) => {
+      let alvo = Date.UTC(hoje.ano, x.mes - 1, x.dia);
+      if (alvo < base) alvo = Date.UTC(hoje.ano + 1, x.mes - 1, x.dia);
+      return { ...x, faltam: Math.round((alvo - base) / 86400_000) };
+    })
+    .filter((x) => x.faltam <= dias)
+    .sort((a, b) => a.faltam - b.faltam);
+}
+
+export async function nivelDeAutonomia(db: Db, jid: string, padrao: number): Promise<number> {
+  const r = await db.query<{ autonomia: number | null; grupo: boolean }>("SELECT autonomia, grupo FROM contatos WHERE jid = $1", [jid]);
+  const c = r.rows[0];
+  if (!c) return 0;
+  // Grupo nunca recebe resposta automática: quem responde em grupo é o dono.
+  if (c.grupo) return 0;
+  return c.autonomia ?? padrao;
+}
+
+export async function definirAutonomia(db: Db, jid: string, nivel: number | null): Promise<void> {
+  await db.query("UPDATE contatos SET autonomia = $2, atualizado_em = now() WHERE jid = $1", [jid, nivel]);
+}
+
+/** Taxa de acerto: rascunhos decididos, e quantos saíram sem ajuste. */
+export async function acertos(db: Db, jid?: string): Promise<{ jid: string; nome: string; decididos: number; sem_ajuste: number; autonomia: number | null }[]> {
+  const r = await db.query(
+    `SELECT r.chat_jid AS jid, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome, c.autonomia,
+            count(*)::int AS decididos,
+            count(*) FILTER (WHERE r.status = 'enviado' AND NOT r.ajustado)::int AS sem_ajuste
+     FROM rascunhos r JOIN contatos c ON c.jid = r.chat_jid
+     WHERE r.status IN ('enviado', 'descartado') AND ($1::text IS NULL OR r.chat_jid = $1)
+     GROUP BY r.chat_jid, c.nome, c.nome_push, c.jid, c.autonomia
+     ORDER BY count(*) DESC`,
+    [jid ?? null],
+  );
+  return r.rows;
+}
+
+export async function rascunhosParaEnviar(db: Db, agora: Date): Promise<Rascunho[]> {
+  const r = await db.query<Rascunho>(
+    `SELECT id, chat_jid, texto, pedido, status FROM rascunhos
+     WHERE status = 'aguardando' AND enviar_em IS NOT NULL AND enviar_em <= $1 ORDER BY enviar_em`,
+    [agora],
+  );
+  return r.rows;
+}
+
+export async function rascunhoAberto(db: Db, jid: string): Promise<boolean> {
+  const r = await db.query("SELECT 1 FROM rascunhos WHERE chat_jid = $1 AND status = 'aguardando'", [jid]);
+  return (r.rowCount ?? 0) > 0;
 }

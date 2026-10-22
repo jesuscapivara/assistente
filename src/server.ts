@@ -7,19 +7,40 @@ function tokenConfere(recebido: string, esperado: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+export function ocultarToken(url: string): string {
+  return url.replace(/^\/(webhook|painel)\/[^/?#]+/, "/$1/***");
+}
+
+export interface OpcoesPainel {
+  token: string;
+  pagina(base: string): Promise<string>;
+  acao(campos: Record<string, string>): Promise<void>;
+}
+
 /**
- * Só duas rotas. O webhook responde 200 na hora e processa depois: o engine espera
- * pouco, e um evento lento (áudio, comando que chama o Claude) não pode segurar os
- * seguintes.
+ * O webhook responde 200 na hora e processa depois: o engine espera pouco, e um
+ * evento lento (áudio, comando que chama o Claude) não pode segurar os seguintes.
+ * O painel só existe com PAINEL_TOKEN.
  */
 export function criarServidor(opts: {
   webhookToken: string;
   aoEvento(payload: unknown): Promise<unknown>;
+  painel?: OpcoesPainel;
 }): FastifyInstance {
   const app = Fastify({
-    logger: { level: process.env.LOG_LEVEL ?? "info" },
+    logger: {
+      level: process.env.LOG_LEVEL ?? "info",
+      // O token do webhook e o do painel vão no caminho: não podem aparecer no log.
+      serializers: {
+        req: (req) => ({ method: req.method, url: ocultarToken(req.url) }),
+      },
+    },
     // O histórico do pareamento chega em eventos grandes.
     bodyLimit: 100 * 1024 * 1024,
+  });
+  // Formulário do painel, sem dependência a mais.
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, corpo, feito) => {
+    feito(null, Object.fromEntries(new URLSearchParams(String(corpo))));
   });
 
   app.get("/saude", async () => ({ ok: true }));
@@ -32,6 +53,21 @@ export function criarServidor(opts: {
     });
     return { ok: true };
   });
+
+  const painel = opts.painel;
+  if (painel) {
+    app.get<{ Params: { token: string } }>("/painel/:token", async (req, reply) => {
+      if (!tokenConfere(req.params.token, painel.token)) return reply.code(404).send();
+      reply.header("Cache-Control", "no-store").header("X-Robots-Tag", "noindex").type("text/html; charset=utf-8");
+      return painel.pagina(`/painel/${req.params.token}`);
+    });
+    app.post<{ Params: { token: string }; Body: Record<string, string> }>("/painel/:token/acao", async (req, reply) => {
+      if (!tokenConfere(req.params.token, painel.token)) return reply.code(404).send();
+      await painel.acao(req.body ?? {});
+      // Volta para a página: recarregar não repete a ação.
+      return reply.redirect(`/painel/${req.params.token}`, 303);
+    });
+  }
 
   return app;
 }

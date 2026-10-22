@@ -43,7 +43,7 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
 
 class IaFalsa implements Ia {
   extracoes: EntradaExtracao[] = [];
-  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false };
+  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null };
   textos: string[] = [];
   sistemas: string[] = [];
   estruturados: unknown[] = [];
@@ -152,6 +152,9 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
       ],
       fatos: ["marido se chama Ricardo"],
       precisa_resposta: true,
+      urgente: false,
+      motivo_urgencia: "",
+      aguardando: null,
     };
 
     await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
@@ -209,17 +212,26 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     expect(avisos.at(-1)).toMatch(/preencher/);
   });
 
-  it("agenda manda o resumo uma vez por dia, no horário do fuso", async () => {
+  it("agenda: diária uma vez por dia no fuso, e semanal só no dia certo", async () => {
     let resumos = 0;
-    const tarefas = { extrair: async () => 0, resumo: async () => void resumos++, limpar: async () => 0 };
-    const base = { db, fuso: "America/Sao_Paulo", resumoHora: "07:30", tarefas, log: () => {} };
-    await tique({ ...base, agora: new Date("2026-10-22T10:00:00Z") }); // 07:00 em SP
+    let semanais = 0;
+    const diarias = [
+      { chave: "resumo", hora: "07:30", rodar: async () => void resumos++ },
+      { chave: "semanal", hora: "18:30", diaDaSemana: 0, rodar: async () => void semanais++ },
+    ];
+    const base = { db, fuso: "America/Sao_Paulo", diarias, log: () => {} };
+    await tique({ ...base, agora: new Date("2026-10-22T10:00:00Z") }); // qui 07:00 em SP
     expect(resumos).toBe(0);
     await tique({ ...base, agora: new Date("2026-10-22T10:31:00Z") }); // 07:31
     await tique({ ...base, agora: new Date("2026-10-22T13:00:00Z") }); // 10:00, mesmo dia
     expect(resumos).toBe(1);
-    await tique({ ...base, agora: new Date("2026-10-23T10:45:00Z") }); // dia seguinte
+    await tique({ ...base, agora: new Date("2026-10-23T10:45:00Z") }); // sexta
     expect(resumos).toBe(2);
+    await tique({ ...base, agora: new Date("2026-10-23T22:00:00Z") }); // sexta 19h: não é domingo
+    expect(semanais).toBe(0);
+    await tique({ ...base, agora: new Date("2026-10-25T21:40:00Z") }); // domingo 18:40
+    await tique({ ...base, agora: new Date("2026-10-25T22:40:00Z") });
+    expect(semanais).toBe(1);
   });
 
   it("busca por palavra e por contato", async () => {

@@ -31,6 +31,14 @@ export const ExtracaoSchema = z.object({
     .array(z.string())
     .describe("Fatos duradouros sobre o contato que valem lembrar (família, trabalho, preferências)"),
   precisa_resposta: z.boolean().describe("A última mensagem é do contato e espera algo do dono"),
+  urgente: z
+    .boolean()
+    .describe("Pede atenção do dono hoje: prazo para hoje, problema, cliente insatisfeito, emergência de família"),
+  motivo_urgencia: z.string().describe("Em poucas palavras, por que é urgente; vazio se não for"),
+  aguardando: z
+    .string()
+    .nullable()
+    .describe("O que o DONO ficou esperando do contato e ainda não recebeu (ex.: 'as medidas da cozinha'); null se nada"),
 });
 export type Extracao = z.infer<typeof ExtracaoSchema>;
 
@@ -57,6 +65,8 @@ export interface PedidoAgente {
   sistema: string;
   conteudo: string;
   ferramentas: Ferramentas;
+  /** Servidor MCP remoto (o KoreOS), chamado pelo conector MCP da API do Claude. */
+  mcp?: { nome: string; url: string; token: string };
 }
 
 const INSTRUCOES_EXTRACAO = `Você lê trechos de conversas do WhatsApp pessoal de uma pessoa (o "dono") para manter a agenda e a memória dela.
@@ -64,6 +74,8 @@ Extraia apenas o que está no trecho marcado como NOVO; o trecho ANTERIOR é só
 - Compromisso: algo combinado com data ou prazo, ou uma promessa ("te mando amanhã", "passo aí sexta", "a gente se fala semana que vem"). Não invente datas: sem prazo dito, quando = null.
 - Em grupos, só compromissos que envolvem o dono diretamente.
 - Fatos: coisas duradouras sobre o contato (quem é, família, trabalho, aniversário, preferências). Nada passageiro ("está no trânsito").
+- Urgente só quando o dono deveria ver hoje; conversa normal não é urgente.
+- Aguardando: olhe a conversa inteira (ANTERIOR + NOVO). Se o contato ficou de mandar ou fazer algo para o dono e ainda não fez, descreva; se já entregou ou não há nada, null.
 - Se não houver nada, devolva listas vazias.`;
 
 // Recusas de classificador são raras neste uso, mas uma conversa pessoal pode cair num
@@ -95,7 +107,7 @@ export function criarIa(opts: { modelo: string; modeloExtracao: string; apiKey?:
         messages: [{ role: "user", content: conteudo }],
       });
       if (resp.stop_reason === "refusal" || !resp.parsed_output) {
-        return { compromissos: [], fatos: [], precisa_resposta: false };
+        return { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null };
       }
       return resp.parsed_output;
     },
@@ -127,14 +139,24 @@ export function criarIa(opts: { modelo: string; modeloExtracao: string; apiKey?:
     },
 
     async agente(p) {
+      // O MCP roda do lado da Anthropic: as ferramentas do KoreOS aparecem para o modelo
+      // junto com as locais, e o runner só executa as locais.
+      const mcp = p.mcp
+        ? {
+            betas: [...FALLBACK.betas, "mcp-client-2025-11-20"],
+            mcp_servers: [{ type: "url" as const, name: p.mcp.nome, url: p.mcp.url, authorization_token: p.mcp.token }],
+          }
+        : {};
+      const tools = p.mcp ? [...p.ferramentas, { type: "mcp_toolset" as const, mcp_server_name: p.mcp.nome }] : p.ferramentas;
       const final = await client.beta.messages.toolRunner({
         model: opts.modelo,
         max_tokens: 8000,
         ...FALLBACK,
+        ...mcp,
         max_iterations: 12,
         system: [{ type: "text", text: p.sistema, cache_control: { type: "ephemeral" } }],
         output_config: { effort: "medium" },
-        tools: p.ferramentas,
+        tools,
         messages: [{ role: "user", content: p.conteudo }],
       });
       if (final.stop_reason === "refusal") return "Não consegui responder isso.";

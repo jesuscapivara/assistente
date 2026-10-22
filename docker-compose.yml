@@ -15,7 +15,10 @@ services:
       db:
         condition: service_healthy
     networks: [interna, evolution]
-    # Sem porta pública: só o engine (na mesma rede) chama o webhook.
+    # Só no localhost da VM: o engine chama pela rede interna, e o painel (se ligado)
+    # é acessado por túnel SSH ou pelo proxy da VM com HTTPS.
+    ports:
+      - "127.0.0.1:3100:3100"
 
   db:
     image: postgres:16-alpine

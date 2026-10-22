@@ -1,0 +1,352 @@
+/**
+ * Fases 2 a 5 contra um Postgres de verdade (DATABASE_URL_TESTE), com Claude, WhatsApp
+ * e Google falsos: cobrança, urgência, autonomia, agenda, briefing, revisão e painel.
+ */
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { enviarAgendados, responderSozinho, type DepsAutonomia } from "../src/autonomia.js";
+import { tratarComando, type DepsControle } from "../src/controle.js";
+import { abrirDb, migrar, type Db } from "../src/db.js";
+import { extrairChat } from "../src/extracao.js";
+import type { Evento, Google } from "../src/google.js";
+import type { EntradaExtracao, Extracao, Ia } from "../src/ia.js";
+import { ingerir } from "../src/ingestao.js";
+import { paginaDoPainel } from "../src/painel.js";
+import { briefings, cobrancas, fimDoDia, radar, revisaoSemanal } from "../src/proativo.js";
+import * as repo from "../src/repo.js";
+import { dadosDoResumo } from "../src/resumo.js";
+import { criarServidor } from "../src/server.js";
+import type { Evolution } from "../src/whatsapp/evolution.js";
+
+const URL_TESTE = process.env.DATABASE_URL_TESTE;
+const DONO = "5551900000000@s.whatsapp.net";
+const FERNANDA = "5551911111111@s.whatsapp.net";
+const JOAO = "5551922222222@s.whatsapp.net";
+const GRUPO = "120363000000@g.us";
+const SP = "America/Sao_Paulo";
+
+let db: Db;
+let seq = 0;
+
+function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; quando?: Date } = {}) {
+  seq++;
+  return {
+    event: "Message",
+    data: {
+      Info: {
+        ID: `P${seq}`,
+        Chat: chat,
+        PushName: o.nome ?? (chat === JOAO ? "João" : "Fernanda"),
+        IsFromMe: !!o.deMim,
+        IsGroup: chat.endsWith("@g.us"),
+        Timestamp: (o.quando ?? new Date(Date.now() - 3600_000)).toISOString(),
+      },
+      Message: { conversation: texto },
+    },
+  };
+}
+
+const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null };
+
+class IaFalsa implements Ia {
+  extracao: Extracao = vazio;
+  rascunho = "Combinado, quinta às 15h então!";
+  risco: { risco: "baixo" | "alto"; motivo: string } = { risco: "baixo", motivo: "resposta simples" };
+  escritos: { sistema: string; conteudo: string }[] = [];
+  async extrair(_e: EntradaExtracao) {
+    return this.extracao;
+  }
+  async escrever(p: { sistema: string; conteudo: string }) {
+    this.escritos.push(p);
+    // O rascunho e os textos de resumo passam por aqui; o rascunho tem PEDIDO.
+    return p.conteudo.includes("PEDIDO de") ? this.rascunho : `resumo: ${p.conteudo.length} caracteres`;
+  }
+  async agente() {
+    return "";
+  }
+  async estruturar() {
+    return this.risco as any;
+  }
+}
+
+class WhatsFalso implements Evolution {
+  enviadas: { destino: string; texto: string }[] = [];
+  async enviarTexto(destino: string, texto: string) {
+    this.enviadas.push({ destino, texto });
+    return `W${this.enviadas.length}`;
+  }
+  async baixarMidia() {
+    return { buffer: Buffer.from(""), mimetype: "audio/ogg" };
+  }
+}
+
+class GoogleFalso implements Google {
+  evs: Evento[] = [];
+  criados: { titulo: string; inicio: Date }[] = [];
+  async eventos(de: Date, ate: Date) {
+    return this.evs.filter((e) => e.inicio < ate && e.fim > de);
+  }
+  async ocupado() {
+    return [];
+  }
+  async criarEvento(e: { titulo: string; inicio: Date }) {
+    this.criados.push(e);
+    return `ev${this.criados.length}`;
+  }
+  async emails() {
+    return [];
+  }
+  async email(): Promise<any> {
+    return {};
+  }
+  async rascunhoEmail() {
+    return "d";
+  }
+}
+
+describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
+  let ia: IaFalsa;
+  let whats: WhatsFalso;
+  let google: GoogleFalso;
+  let avisos: string[];
+  let deps: DepsControle;
+  let auto: DepsAutonomia;
+  let agora: Date;
+
+  const ing = (p: unknown) => ingerir(p, { db, jidsDoDono: new Set([DONO]), aoComando: async () => {} });
+
+  beforeAll(async () => {
+    db = abrirDb(URL_TESTE!);
+    await db.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+    await migrar(db);
+  });
+  afterAll(async () => db?.end());
+
+  beforeEach(async () => {
+    await db.query(
+      "TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado, apelidos, perfil, datas, alertas RESTART IDENTITY CASCADE",
+    );
+    ia = new IaFalsa();
+    whats = new WhatsFalso();
+    google = new GoogleFalso();
+    avisos = [];
+    // Quinta, 22/10/2026, 11h em São Paulo: horário em que mensagem automática pode sair.
+    agora = new Date("2026-10-22T14:00:00Z");
+    deps = {
+      db,
+      ia,
+      evolution: whats,
+      dono: "Lucas",
+      fuso: SP,
+      avisar: async (t) => void avisos.push(t),
+      google,
+      sincronizarAgenda: true,
+    };
+    auto = { db, ia, evolution: whats, dono: "Lucas", fuso: SP, avisar: deps.avisar, padrao: 0, janelaMin: 10, agora: () => agora };
+  });
+
+  it("extração: o que o dono espera do contato, urgência uma vez só, e chama a autonomia", async () => {
+    await ing(msg(FERNANDA, "Te mando as medidas da cozinha amanhã. Urgente: vazou água na obra!", { quando: new Date(Date.now() - 600_000) }));
+    ia.extracao = { ...vazio, urgente: true, motivo_urgencia: "vazamento na obra", aguardando: "as medidas da cozinha", precisa_resposta: true };
+    const pediram: string[] = [];
+    await extrairChat({ ...deps, quietoMin: 0, aoPrecisarResposta: async (j) => void pediram.push(j) }, FERNANDA);
+    const f = await repo.lerContato(db, FERNANDA);
+    expect(f?.aguardando).toBe("as medidas da cozinha");
+    expect(avisos.filter((a) => a.startsWith("⚡"))).toHaveLength(1);
+    expect(avisos[0]).toMatch(/Fernanda.*vazamento na obra/);
+    expect(pediram).toEqual([FERNANDA]);
+
+    // Ela entregou: a próxima extração limpa o "aguardando".
+    await ing(msg(FERNANDA, "segue as medidas", { quando: new Date(Date.now() - 300_000) }));
+    ia.extracao = { ...vazio, aguardando: null };
+    await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
+    expect((await repo.lerContato(db, FERNANDA))?.aguardando).toBe("");
+  });
+
+  it("cobrança: pergunta uma vez por assunto, e 'cobra' propõe o rascunho", async () => {
+    await ing(msg(JOAO, "te mando o projeto elétrico"));
+    await repo.atualizarAguardando(db, JOAO, "o projeto elétrico");
+    await db.query("UPDATE contatos SET aguardando_desde = now() - interval '5 days' WHERE jid = $1", [JOAO]);
+    expect(await cobrancas(deps, 3)).toBe(1);
+    expect(avisos.at(-1)).toMatch(/João\* ficou de mandar o projeto elétrico \(há 5 dias\)/);
+    expect(await cobrancas(deps, 3)).toBe(0);
+
+    await tratarComando(deps, "cobra João");
+    expect(ia.escritos.at(-1)!.conteudo).toMatch(/PEDIDO de Lucas: Cobrar com educação[\s\S]*projeto elétrico/);
+    expect(avisos.at(-1)).toMatch(/Rascunho #1 para \*João\*/);
+    expect(await repo.paraCobrar(db, 3)).toEqual([]);
+  });
+
+  it("autonomia 0 não faz nada; 1 propõe e espera ok", async () => {
+    await ing(msg(FERNANDA, "Pode ser quinta às 15h?"));
+    expect(await responderSozinho(auto, FERNANDA)).toBe("nada");
+    await repo.definirAutonomia(db, FERNANDA, 1);
+    expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+    expect(avisos.at(-1)).toMatch(/Fernanda espera resposta[\s\S]*Rascunho #1/);
+    expect(whats.enviadas).toHaveLength(0);
+    // Já tem rascunho aberto: não propõe outro.
+    expect(await responderSozinho(auto, FERNANDA)).toBe("nada");
+  });
+
+  it("autonomia 2: agenda, sai depois da janela; veto e pausa seguram", async () => {
+    await ing(msg(FERNANDA, "Pode ser quinta às 15h?"));
+    await repo.definirAutonomia(db, FERNANDA, 2);
+    expect(await responderSozinho(auto, FERNANDA)).toBe("agendado");
+    expect(avisos.at(-1)).toMatch(/Respondo \*Fernanda\* em 10 min se você não vetar/);
+
+    expect(await enviarAgendados(auto)).toBe(0); // ainda na janela
+    agora = new Date(agora.getTime() + 11 * 60_000);
+    expect(await enviarAgendados(auto)).toBe(1);
+    expect(whats.enviadas).toEqual([{ destino: FERNANDA, texto: "Combinado, quinta às 15h então!" }]);
+
+    // Segundo rascunho: vetado na janela.
+    await ing(msg(FERNANDA, "e sexta?"));
+    expect(await responderSozinho(auto, FERNANDA)).toBe("agendado");
+    await tratarComando(deps, "veta 2");
+    agora = new Date(agora.getTime() + 11 * 60_000);
+    expect(await enviarAgendados(auto)).toBe(0);
+
+    // Terceiro: pausa geral tira o agendamento.
+    await ing(msg(FERNANDA, "e sábado?"));
+    expect(await responderSozinho(auto, FERNANDA)).toBe("agendado");
+    await tratarComando(deps, "pausa");
+    agora = new Date(agora.getTime() + 11 * 60_000);
+    expect(await enviarAgendados(auto)).toBe(0);
+    expect(whats.enviadas).toHaveLength(1);
+    expect((await repo.lerRascunho(db, 3))?.status).toBe("aguardando");
+  });
+
+  it("risco alto nunca sai sozinho: palavra de dinheiro, classificador e [preencher]", async () => {
+    await repo.garantirContato(db, FERNANDA, { grupo: false });
+    await repo.definirAutonomia(db, FERNANDA, 3);
+    await ing(msg(FERNANDA, "quanto fica?"));
+    ia.rascunho = "Fica R$ 4.500 o projeto.";
+    expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+    expect(avisos.at(-1)).toMatch(/precisa de você: fala de "R\$"/);
+    await tratarComando(deps, "descarta");
+
+    ia.rascunho = "Acho que dá sim.";
+    ia.risco = { risco: "alto", motivo: "opinião técnica" };
+    expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+    await tratarComando(deps, "descarta");
+
+    ia.rascunho = "Te confirmo [preencher: horário].";
+    expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+    expect(whats.enviadas).toHaveLength(0);
+  });
+
+  it("autonomia 3 envia direto o simples, mas não de madrugada nem em grupo", async () => {
+    await ing(msg(FERNANDA, "obrigada!"));
+    await repo.definirAutonomia(db, FERNANDA, 3);
+    ia.rascunho = "Imagina! 😊";
+    expect(await responderSozinho(auto, FERNANDA)).toBe("enviado");
+    expect(whats.enviadas[0]).toEqual({ destino: FERNANDA, texto: "Imagina! 😊" });
+
+    await ing(msg(FERNANDA, "boa noite!"));
+    agora = new Date("2026-10-23T05:00:00Z"); // 02h em SP
+    expect(await responderSozinho(auto, FERNANDA)).toBe("proposto");
+
+    await ing(msg(GRUPO, "alguém?"));
+    await repo.definirAutonomia(db, GRUPO, 3);
+    expect(await repo.nivelDeAutonomia(db, GRUPO, 3)).toBe(0);
+  });
+
+  it("taxa de acerto: ajuste conta contra", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    for (let i = 0; i < 3; i++) await repo.criarRascunho(db, FERNANDA, `r${i}`, "x");
+    await tratarComando(deps, "ok 1");
+    await tratarComando(deps, "ajusta 2 mais curto");
+    await tratarComando(deps, "ok 2");
+    await tratarComando(deps, "descarta 3");
+    const [a] = await repo.acertos(db, FERNANDA);
+    expect(a).toMatchObject({ decididos: 3, sem_ajuste: 1 });
+    await tratarComando(deps, "autonomia");
+    expect(avisos.at(-1)).toMatch(/Fernanda: 1\/3/);
+    await tratarComando(deps, "autonomia Fernanda 2");
+    expect(avisos.at(-1)).toMatch(/nível 2 \(envia se você não vetar\)/);
+  });
+
+  it("confirma leva o compromisso do dono para a agenda, uma vez", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    const quando = new Date("2026-10-23T18:00:00Z");
+    const id = (await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "visita à obra", quando, responsavel: "eu" }))!;
+    await tratarComando(deps, `confirma ${id}`);
+    expect(google.criados).toEqual([expect.objectContaining({ titulo: "visita à obra (Fernanda)", inicio: quando })]);
+    expect(avisos.at(-1)).toMatch(/Coloquei na agenda/);
+    await tratarComando(deps, `confirma ${id}`);
+    expect(google.criados).toHaveLength(1);
+  });
+
+  it("briefing antes da reunião, com a ficha de quem vai estar", async () => {
+    await ing(msg(FERNANDA, "Amanhã a gente fecha a marcenaria"));
+    await repo.atualizarFicha(db, FERNANDA, { relacao: "cliente", resumo: "Cliente do Bela Vista" });
+    google.evs = [
+      {
+        id: "e1",
+        titulo: "Reunião com Fernanda",
+        inicio: new Date(Date.now() + 30 * 60_000),
+        fim: new Date(Date.now() + 90 * 60_000),
+        diaInteiro: false,
+        local: "Escritório",
+        descricao: "",
+        convidados: [],
+      },
+    ];
+    expect(await briefings(deps, 45)).toBe(1);
+    expect(avisos.at(-1)).toMatch(/📅 Em 30 min: \*Reunião com Fernanda\* \(Escritório\)/);
+    expect(ia.escritos.at(-1)!.conteudo).toMatch(/Cliente do Bela Vista[\s\S]*fecha a marcenaria/);
+    expect(await briefings(deps, 45)).toBe(0);
+  });
+
+  it("fim do dia, datas, radar e revisão da semana", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    const hoje = new Date();
+    await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "mandar o orçamento", quando: new Date(hoje.getTime() - 60_000), responsavel: "eu" });
+    expect(await fimDoDia(deps, hoje)).toBe(1);
+    expect(avisos.at(-1)).toMatch(/Ainda aberto de hoje[\s\S]*mandar o orçamento/);
+
+    const amanha = new Date(hoje.getTime() + 86400_000);
+    const p = new Intl.DateTimeFormat("en-CA", { timeZone: SP, month: "numeric", day: "numeric" }).formatToParts(amanha);
+    await repo.gravarDatas(db, FERNANDA, [{ descricao: "aniversário", mes: Number(p.find((x) => x.type === "month")!.value), dia: Number(p.find((x) => x.type === "day")!.value) }]);
+    expect(await dadosDoResumo(deps, hoje)).toMatch(/🎂 amanhã: aniversário — Fernanda/);
+
+    // Cliente que sumiu há 30 dias, com histórico de conversa.
+    await repo.atualizarFicha(db, JOAO, { relacao: "cliente" });
+    for (let i = 0; i < 10; i++) await ing(msg(JOAO, `msg ${i}`, { quando: new Date(Date.now() - (30 + i) * 86400_000) }));
+    await repo.atualizarFicha(db, JOAO, { relacao: "cliente" });
+    expect((await radar(db)).map((x) => x.nome)).toEqual(["João"]);
+
+    await revisaoSemanal(deps, hoje);
+    expect(avisos.at(-1)).toMatch(/🗓️ \*Revisão da semana\*/);
+    expect(ia.escritos.at(-1)!.conteudo).toMatch(/Faz tempo que não fala com:\nJoão \(cliente, 30 dias\)/);
+  });
+
+  it("painel: página com a fila, e as rotas exigem o token", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    await repo.criarRascunho(db, FERNANDA, "Oi Fê <script>", "x");
+    const html = await paginaDoPainel(db, "/painel/T", { fuso: SP, dono: "Lucas", niveis: ["a", "b", "c", "d"], padrao: 0 });
+    expect(html).toContain("#1 · Fernanda");
+    expect(html).toContain("Oi Fê &lt;script&gt;");
+    expect(html).not.toContain("<script>");
+
+    const acoes: Record<string, string>[] = [];
+    const app = criarServidor({
+      webhookToken: "w".repeat(16),
+      aoEvento: async () => {},
+      painel: { token: "t".repeat(24), pagina: async () => "<html>ok</html>", acao: async (c) => void acoes.push(c) },
+    });
+    expect((await app.inject({ method: "GET", url: "/painel/errado" })).statusCode).toBe(404);
+    const pag = await app.inject({ method: "GET", url: `/painel/${"t".repeat(24)}` });
+    expect(pag.statusCode).toBe(200);
+    expect(pag.headers["cache-control"]).toBe("no-store");
+    const post = await app.inject({
+      method: "POST",
+      url: `/painel/${"t".repeat(24)}/acao`,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "acao=enviar&id=1",
+    });
+    expect(post.statusCode).toBe(303);
+    expect(acoes).toEqual([{ acao: "enviar", id: "1" }]);
+    expect((await app.inject({ method: "POST", url: "/painel/errado/acao", payload: "acao=pausa", headers: { "content-type": "application/x-www-form-urlencoded" } })).statusCode).toBe(404);
+    await app.close();
+  });
+});

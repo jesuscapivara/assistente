@@ -1,72 +1,89 @@
 import { gravarEstado, lerEstado, type Db } from "./db.js";
 import { relogio } from "./formato.js";
 
-export interface Tarefas {
-  extrair(): Promise<unknown>;
-  resumo(): Promise<void>;
-  limpar(): Promise<unknown>;
-  /** Fichas, lições e retrato: de madrugada, quando ninguém está esperando resposta. */
-  estudar?(): Promise<unknown>;
+/**
+ * Tarefa de horário marcado. Guarda o último dia em que rodou: reiniciar o processo
+ * logo depois do horário não repete, e o dia em que ele estava fora no horário ainda
+ * roda quando voltar (até a meia-noite).
+ */
+export interface TarefaDiaria {
+  chave: string;
+  hora: string; // "HH:MM" no fuso do dono
+  /** 0 = domingo … 6 = sábado. Sem isso, todo dia. */
+  diaDaSemana?: number;
+  rodar(): Promise<unknown>;
 }
 
-/**
- * Relógio do assistente, num processo só. O resumo e a limpeza guardam o último dia
- * em que rodaram: reiniciar o processo às 07:31 não manda o resumo duas vezes, e o
- * dia em que ele estava fora às 07:30 ainda recebe o resumo quando voltar.
- */
+const DIAS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export function diaDaSemana(d: Date, fuso: string): number {
+  return DIAS.indexOf(new Intl.DateTimeFormat("en-US", { timeZone: fuso, weekday: "short" }).format(d));
+}
+
 export function iniciarAgenda(opts: {
   db: Db;
   fuso: string;
-  resumoHora: string;
-  intervaloExtracaoSeg: number;
-  tarefas: Tarefas;
+  /** Roda a cada `intervaloSeg`, uma de cada vez (extração). */
+  continua: { intervaloSeg: number; rodar(): Promise<unknown> };
+  /** Roda todo minuto (briefing, envio com janela de veto). */
+  porMinuto: (() => Promise<unknown>)[];
+  diarias: TarefaDiaria[];
   log: (o: object, txt: string) => void;
 }): () => void {
-  let extraindo = false;
-  const extracao = setInterval(async () => {
-    if (extraindo) return;
-    extraindo = true;
+  let ocupado = false;
+  const continua = setInterval(async () => {
+    if (ocupado) return;
+    ocupado = true;
     try {
-      await opts.tarefas.extrair();
+      await opts.continua.rodar();
     } catch (err) {
-      opts.log({ err: String(err) }, "rodada de extração falhou");
+      opts.log({ err: String(err) }, "rodada contínua falhou");
     } finally {
-      extraindo = false;
+      ocupado = false;
     }
-  }, opts.intervaloExtracaoSeg * 1000);
+  }, opts.continua.intervaloSeg * 1000);
 
-  const minuto = setInterval(() => void tique(opts), 60_000);
-  void tique(opts);
+  let noMinuto = false;
+  const minuto = async () => {
+    if (noMinuto) return;
+    noMinuto = true;
+    try {
+      for (const f of opts.porMinuto) await f().catch((err) => opts.log({ err: String(err) }, "tarefa do minuto falhou"));
+      await tique({ db: opts.db, fuso: opts.fuso, diarias: opts.diarias, log: opts.log });
+    } finally {
+      noMinuto = false;
+    }
+  };
+  const relogioMinuto = setInterval(() => void minuto(), 60_000);
+  void minuto();
 
   return () => {
-    clearInterval(extracao);
-    clearInterval(minuto);
+    clearInterval(continua);
+    clearInterval(relogioMinuto);
   };
 }
 
 export async function tique(opts: {
   db: Db;
   fuso: string;
-  resumoHora: string;
-  tarefas: Tarefas;
+  diarias: TarefaDiaria[];
   log: (o: object, txt: string) => void;
   agora?: Date;
 }): Promise<void> {
-  const { dia, hora } = relogio(opts.agora ?? new Date(), opts.fuso);
-  try {
-    if (hora >= opts.resumoHora && (await lerEstado(opts.db, "resumo:ultimo_dia")) !== dia) {
-      await gravarEstado(opts.db, "resumo:ultimo_dia", dia);
-      await opts.tarefas.resumo();
+  const agora = opts.agora ?? new Date();
+  const { dia, hora } = relogio(agora, opts.fuso);
+  const semana = diaDaSemana(agora, opts.fuso);
+  for (const t of opts.diarias) {
+    if (t.diaDaSemana !== undefined && t.diaDaSemana !== semana) continue;
+    if (hora < t.hora) continue;
+    const chave = `${t.chave}:ultimo_dia`;
+    try {
+      if ((await lerEstado(opts.db, chave)) === dia) continue;
+      // Grava antes: se a tarefa cair no meio, não repete em laço a cada minuto.
+      await gravarEstado(opts.db, chave, dia);
+      await t.rodar();
+    } catch (err) {
+      opts.log({ err: String(err), tarefa: t.chave }, "tarefa diária falhou");
     }
-    if (hora >= "03:00" && (await lerEstado(opts.db, "limpeza:ultimo_dia")) !== dia) {
-      await gravarEstado(opts.db, "limpeza:ultimo_dia", dia);
-      await opts.tarefas.limpar();
-    }
-    if (opts.tarefas.estudar && hora >= "04:00" && (await lerEstado(opts.db, "estudo:ultimo_dia")) !== dia) {
-      await gravarEstado(opts.db, "estudo:ultimo_dia", dia);
-      await opts.tarefas.estudar();
-    }
-  } catch (err) {
-    opts.log({ err: String(err) }, "agenda falhou");
   }
 }
