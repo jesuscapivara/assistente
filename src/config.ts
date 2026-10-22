@@ -34,6 +34,12 @@ const Esquema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   MODELO_TRANSCRICAO: z.string().default("gpt-4o-mini-transcribe"),
 
+  // Telegram: opcional. Com o token e o chat do dono, os avisos e o resumo vão pelo bot
+  // (com notificação) em vez do chat consigo mesmo do WhatsApp, que chega mudo. Os
+  // comandos valem nos dois. Sem o chat id, o log mostra o id de quem escreveu ao bot.
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().optional(),
+
   // Google (opcional): agenda e Gmail. Token gerado com scripts/google.mjs.
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),

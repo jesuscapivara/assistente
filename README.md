@@ -145,6 +145,11 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
 ### Opcionais
 
 - **Áudio** (transcrição e comando falado): `OPENAI_API_KEY`.
+- **Telegram** (avisos com notificação): no WhatsApp o assistente fala pela sua própria
+  conta, e mensagem da própria conta não notifica. Crie um bot no @BotFather, ponha o token
+  em `TELEGRAM_BOT_TOKEN`, mande qualquer mensagem ao bot e pegue o seu id no log
+  ("mensagem de chat que não é o do dono") para `TELEGRAM_CHAT_ID`. Daí em diante avisos e
+  resumo vão pelo bot, e os comandos (texto ou áudio) valem lá e no chat consigo mesmo.
 - **Google (agenda e Gmail)**: no Google Cloud Console, ative as APIs *Google Calendar* e
   *Gmail*, crie um *OAuth client ID* do tipo *Desktop app* e, **no seu computador**, rode
   `GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… node scripts/google.mjs`. Autorize no navegador e

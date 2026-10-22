@@ -16,8 +16,14 @@ Leia o README antes (fluxo, comandos, instalação).
 - As travas do envio automático são conferidas no banco, no mesmo UPDATE que reserva o rascunho
   (`repo.reservarEnvio`): entre ler e enviar, o dono pode vetar, ajustar, pausar, baixar o nível,
   tirar a pessoa ou responder à mão. Não confira só em memória antes de enviar.
-- Tudo que o assistente escreve vai para o chat do dono consigo mesmo, com 🤖, pela função
-  `avisar`, que registra o id em `enviadas` (senão o eco do webhook vira comando, em laço).
+- Tudo que o assistente escreve ao dono passa pela função `avisar`: pelo bot do Telegram,
+  quando `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` existem (o WhatsApp não notifica mensagem
+  da própria conta), ou pelo chat dele consigo mesmo, com 🤖, registrando o id em `enviadas`
+  (senão o eco do webhook vira comando, em laço). Comandos valem nos dois canais.
+- O Telegram só ouve `TELEGRAM_CHAT_ID`: mensagem de outro chat vai para o log, nunca vira
+  comando. O token fica só no `.env` da VM.
+- O que o assistente envia a um contato é gravado na conversa no próprio `executarEnvio`:
+  a Evolution GO não devolve pelo webhook o que a API envia.
 - Chat `excluido` não grava nada; `fora` apaga o que havia. Respeite isso em qualquer consulta nova.
 - Conhecimento do dono: `perfil` (regra > lição > gerado) e a ficha em `contatos`. Os dois entram
   em todo rascunho e no agente por `perfilEmTexto`/`fichaEmTexto` (`src/repo.ts`).

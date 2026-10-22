@@ -22,6 +22,7 @@ import { briefings, cobrancas, fimDoDia, lembretesNaHora, revisaoSemanal } from 
 import * as repo from "./repo.js";
 import { assuntoDe, coletarDia, diasEsperando, ficouParaTras, resumoEmTexto } from "./resumo.js";
 import { criarServidor } from "./server.js";
+import { criarTelegram } from "./telegram.js";
 import { transcrever } from "./transcricao.js";
 import { criarEvolution } from "./whatsapp/evolution.js";
 
@@ -48,14 +49,23 @@ const google = googleLigado(cfg)
 const koreos = cfg.KOREOS_MCP_URL && cfg.KOREOS_MCP_TOKEN ? { url: cfg.KOREOS_MCP_URL, token: cfg.KOREOS_MCP_TOKEN } : undefined;
 const donoJid = `${cfg.DONO_NUMERO}@s.whatsapp.net`;
 
+const telegram = cfg.TELEGRAM_BOT_TOKEN ? criarTelegram(cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID) : undefined;
+/** Com o chat do dono no Telegram, é por lá que o assistente fala (lá há notificação). */
+const peloTelegram = Boolean(telegram && cfg.TELEGRAM_CHAT_ID);
+
 /**
- * Tudo que o assistente diz vai para o chat do dono consigo mesmo, com 🤖 na frente
- * para não se confundir com o que ele mesmo anota ali. O id fica guardado para o
- * webhook não tratar a própria resposta como comando.
+ * Tudo que o assistente diz vai para o dono: pelo Telegram, quando ligado, ou pelo
+ * chat dele consigo mesmo no WhatsApp, com 🤖 na frente para não se confundir com o
+ * que ele mesmo anota ali. No WhatsApp o id fica guardado para o webhook não tratar
+ * a própria resposta como comando.
  */
 async function avisar(texto: string, refs = ""): Promise<void> {
-  const id = await evolution.enviarTexto(donoJid, `🤖 ${texto}`);
-  await repo.registrarEnviada(db, id);
+  if (peloTelegram) {
+    await telegram!.enviarTexto(texto);
+  } else {
+    const id = await evolution.enviarTexto(donoJid, `🤖 ${texto}`);
+    await repo.registrarEnviada(db, id);
+  }
   // O que o assistente disse é o contexto da próxima mensagem do dono ("sim", "o segundo").
   await repo.registrarFala(db, "assistente", texto, refs).catch(() => undefined);
 }
@@ -79,7 +89,6 @@ async function enviarResumo(): Promise<void> {
       // O painel reaproveita a frase do dia, sem chamar o modelo de novo.
       await gravarEstado(db, "manchete", JSON.stringify({ dia: relogio(dia.agora, cfg.FUSO).dia, texto: plano.manchete })).catch(() => undefined);
       const png = await desenharCartao(dia, plano, cfg.FUSO, pauta);
-      const url = `${urlInterna(cfg)}/midia/${guardarImagem(png)}.png`;
       const compromissos = [...dia.comData, ...dia.semData].map((c) => `#${c.id} ${c.descricao}`).slice(0, 8);
       const comLetra = [...pauta.precisa, ...pauta.ficou].filter((x) => x.letra);
       const legenda = [
@@ -89,8 +98,13 @@ async function enviarResumo(): Promise<void> {
       ]
         .filter(Boolean)
         .join("\n\n");
-      const id = await evolution.enviarImagem(donoJid, url, legenda.slice(0, 1000));
-      await repo.registrarEnviada(db, id);
+      if (peloTelegram) {
+        await telegram!.enviarFoto(png, legenda.replace(/^🤖 /, ""));
+      } else {
+        const url = `${urlInterna(cfg)}/midia/${guardarImagem(png)}.png`;
+        const id = await evolution.enviarImagem(donoJid, url, legenda.slice(0, 1000));
+        await repo.registrarEnviada(db, id);
+      }
       await gravarPauta(db, comLetra);
       // O que estava na imagem vai por extenso no diálogo: o agente não vê a figura.
       const letraDe = (x: { letra: string } | undefined) => (x?.letra ? `${x.letra}. ` : "");
@@ -206,7 +220,7 @@ const app = criarServidor({
           // Os comandos de sempre respondem no WhatsApp, que é o registro do que foi feito.
           if ("texto" in c) {
             await comando(c.texto);
-            return "Feito. A confirmação foi para o seu WhatsApp.";
+            return `Feito. A confirmação foi para o seu ${peloTelegram ? "Telegram" : "WhatsApp"}.`;
           }
           if ("autonomia" in c) {
             await repo.definirAutonomia(db, c.autonomia.jid, c.autonomia.nivel);
@@ -220,7 +234,7 @@ const app = criarServidor({
             const ct = await repo.lerContato(db, c.responder.jid);
             if (!ct || ct.excluido) return "Essa conversa não está mais no assistente.";
             const id = await proporResposta(depsControle, ct.jid, c.responder.instrucao || `Responder ao que está pendente: ${ct.situacao || "a última mensagem"}.`);
-            return `Rascunho #${id} pronto: está aqui embaixo e no seu WhatsApp.`;
+            return `Rascunho #${id} pronto: está aqui embaixo e no seu ${peloTelegram ? "Telegram" : "WhatsApp"}.`;
           }
           if ("corrigir" in c) return corrigirLeitura(depsControle, { jid: c.corrigir.jid }, c.corrigir.texto);
           if ("perguntar" in c) {
@@ -278,6 +292,21 @@ const pararAgenda = iniciarAgenda({
 });
 
 await app.listen({ port: cfg.PORT, host: "0.0.0.0" });
+
+// Comandos pelo bot do Telegram: os mesmos do chat consigo mesmo, por texto ou áudio.
+const pararTelegram = telegram
+  ? telegram.ouvir({
+      aoTexto: (texto) => comando(texto),
+      aoAudio: async (audio) => {
+        if (!cfg.OPENAI_API_KEY) return avisar("Para comandos por áudio, configure OPENAI_API_KEY.");
+        const texto = await transcrever(audio, { apiKey: cfg.OPENAI_API_KEY, modelo: cfg.MODELO_TRANSCRICAO }).catch(() => "");
+        if (!texto) return avisar("Não entendi o áudio. Pode mandar de novo ou escrever?");
+        await avisar(`🎙️ "${texto}"`);
+        await comando(texto);
+      },
+      log,
+    })
+  : () => undefined;
 app.log.info(
   { migracoes: aplicadas, google: Boolean(google), koreos: Boolean(koreos), painel: Boolean(cfg.PAINEL_TOKEN) },
   "assistente no ar",
@@ -294,6 +323,7 @@ void (async () => {
 for (const sinal of ["SIGINT", "SIGTERM"] as const) {
   process.on(sinal, async () => {
     pararAgenda();
+    pararTelegram();
     await app.close();
     await db.end();
     process.exit(0);
