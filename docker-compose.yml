@@ -1,0 +1,42 @@
+# Na VM de staging. O assistente e o banco dele ficam isolados do KoreOS; o engine do
+# WhatsApp é a Evolution GO que já roda lá (uma instância nova, só para o seu número).
+#
+# A rede `evolution` é a do engine existente: confira o nome com
+#   docker network ls
+# e ajuste EVOLUTION_NETWORK no .env (ex.: koreos-infra_default).
+services:
+  assistente:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://assistente:${POSTGRES_PASSWORD}@db:5432/assistente
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [interna, evolution]
+    # Sem porta pública: só o engine (na mesma rede) chama o webhook.
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: assistente
+      POSTGRES_DB: assistente
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - dados:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assistente"]
+      interval: 5s
+      retries: 10
+    networks: [interna]
+
+volumes:
+  dados:
+
+networks:
+  interna:
+  evolution:
+    external: true
+    name: ${EVOLUTION_NETWORK}
