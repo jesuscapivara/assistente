@@ -46,8 +46,9 @@ if (ja) {
 }
 const tokenInstancia = ja?.token ?? token;
 
-// Só mensagens e estado da sessão: o assistente não precisa do resto.
-const subscribe = ["MESSAGE", "Connected", "Disconnected", "LoggedOut"];
+// Mensagens, o histórico do pareamento (para já começar conhecendo as pessoas) e o
+// estado da sessão. O resto (presença, recibos, chamadas) o assistente não usa.
+const subscribe = ["MESSAGE", "HISTORY_SYNC", "CONNECTION"];
 await chamar("POST", "/instance/connect", tokenInstancia, { webhookUrl, subscribe, immediate: true });
 
 if (telefone) {

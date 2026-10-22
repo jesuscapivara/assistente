@@ -10,6 +10,8 @@ export interface Ia {
   extrair(entrada: EntradaExtracao): Promise<Extracao>;
   escrever(pedido: PedidoTexto): Promise<string>;
   agente(pedido: PedidoAgente): Promise<string>;
+  /** Resposta em JSON validado pelo schema; `null` se o modelo recusar ou não fechar o JSON. */
+  estruturar<T extends z.ZodType>(schema: T, pedido: PedidoTexto): Promise<z.infer<T> | null>;
 }
 
 export const ExtracaoSchema = z.object({
@@ -109,6 +111,19 @@ export function criarIa(opts: { modelo: string; modeloExtracao: string; apiKey?:
       });
       if (resp.stop_reason === "refusal") return "";
       return textoDe(resp.content);
+    },
+
+    async estruturar(schema, p) {
+      const resp = await client.beta.messages.parse({
+        model: opts.modelo,
+        max_tokens: 8000,
+        ...FALLBACK,
+        system: [{ type: "text", text: p.sistema, cache_control: { type: "ephemeral" } }],
+        output_config: { effort: p.esforco ?? "medium", format: betaZodOutputFormat(schema) },
+        messages: [{ role: "user", content: p.conteudo }],
+      });
+      if (resp.stop_reason === "refusal") return null;
+      return (resp.parsed_output ?? null) as z.infer<typeof schema> | null;
     },
 
     async agente(p) {

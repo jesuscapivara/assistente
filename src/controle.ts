@@ -1,6 +1,7 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Db } from "./db.js";
+import { estudar } from "./conhecer.js";
 import { agoraPorExtenso, dataCurta, linhas } from "./formato.js";
 import type { Ia } from "./ia.js";
 import { escreverRascunho, previa, proporResposta } from "./rascunho.js";
@@ -30,6 +31,10 @@ export type Comando =
   | { tipo: "excluir"; nome: string }
   | { tipo: "incluir"; nome: string }
   | { tipo: "resumo" }
+  | { tipo: "perfil" }
+  | { tipo: "regra"; texto: string }
+  | { tipo: "esquecer"; id: number }
+  | { tipo: "estudar" }
   | { tipo: "ajuda" }
   | { tipo: "pedido"; texto: string };
 
@@ -52,6 +57,10 @@ export function lerComando(texto: string): Comando {
   if ((m = t.match(/^(fora|exclui|excluir)\s+(.+)$/i))) return { tipo: "excluir", nome: m[2].trim() };
   if ((m = t.match(/^(volta|inclui|incluir)\s+(.+)$/i))) return { tipo: "incluir", nome: m[2].trim() };
   if (/^(resumo|bom dia)[.!]?$/i.test(t)) return { tipo: "resumo" };
+  if (/^(perfil|meu perfil)[.!?]?$/i.test(t)) return { tipo: "perfil" };
+  if ((m = t.match(/^regra[\s:,-]+([\s\S]+)$/i))) return { tipo: "regra", texto: m[1].trim() };
+  if ((m = t.match(/^esquece(?:\s+(?:a\s+)?(?:regra|li[çc][ãa]o))?\s+#?(\d+)$/i))) return { tipo: "esquecer", id: Number(m[1]) };
+  if (/^(estuda|estudar)[.!]?$/i.test(t)) return { tipo: "estudar" };
   if (/^(ajuda|help|\?)$/i.test(t)) return { tipo: "ajuda" };
   return { tipo: "pedido", texto: t };
 }
@@ -64,6 +73,11 @@ const AJUDA = `*Comandos*
 • fora <nome> — tira a conversa ou o grupo do assistente (e apaga o que já tinha)
 • volta <nome> — põe de volta
 • resumo
+• perfil — o que eu sei de você
+• regra <texto> — uma regra sua ("regra nunca marco nada antes das 9")
+• esquece N — apaga a regra ou lição N
+• estuda — atualiza agora as fichas e o seu perfil
+• áudio também vale: fale o pedido
 Fora isso, é só pedir: "o que eu combinei com a Fernanda?", "responde o João dizendo que amanhã não dá".`;
 
 export async function tratarComando(deps: DepsControle, texto: string): Promise<void> {
@@ -94,11 +108,35 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
       return alternarChat(deps, c.nome, c.tipo === "excluir");
     case "resumo":
       return deps.avisar(await montarResumo(deps));
+    case "perfil":
+      return deps.avisar(await mostrarPerfil(deps));
+    case "regra": {
+      const id = await repo.acrescentarPerfil(deps.db, "regra", c.texto);
+      return deps.avisar(id ? `Regra #${id} anotada. Vale para tudo que eu escrever.` : "Essa regra já estava anotada.");
+    }
+    case "esquecer": {
+      const ok = await repo.desativarPerfil(deps.db, c.id);
+      return deps.avisar(ok ? `Esqueci o #${c.id}.` : `Não achei regra ou lição #${c.id}.`);
+    }
+    case "estudar": {
+      await deps.avisar("Estudando as conversas, leva alguns minutos…");
+      return deps.avisar(`Pronto: ${await estudar(deps, { fichas: 40, forcarPerfil: true })}.`);
+    }
     case "ajuda":
       return deps.avisar(AJUDA);
     case "pedido":
       return atenderPedido(deps, c.texto);
   }
+}
+
+async function mostrarPerfil(deps: DepsControle): Promise<string> {
+  const p = await repo.lerPerfil(deps.db);
+  const partes = [
+    p.regras.length ? `*Suas regras*\n${p.regras.map((r) => `#${r.id} ${r.texto}`).join("\n")}` : "*Suas regras*\nnenhuma ainda (regra <texto>)",
+    p.licoes.length ? `*O que aprendi com as suas correções*\n${p.licoes.map((r) => `#${r.id} ${r.texto}`).join("\n")}` : "",
+    p.gerado ? `*Seu retrato*\n${p.gerado}` : "Ainda não tenho mensagens suficientes suas para um retrato (estuda força).",
+  ];
+  return partes.filter(Boolean).join("\n\n") + "\n\n_esquece N apaga uma regra ou lição_";
 }
 
 async function enviarRascunho(deps: DepsControle, id?: number): Promise<void> {
@@ -112,7 +150,9 @@ async function enviarRascunho(deps: DepsControle, id?: number): Promise<void> {
   try {
     // Volta pelo webhook como mensagem "de mim" na conversa do contato, e é gravada
     // ali como qualquer outra: entra no contexto e nos exemplos de estilo.
-    await deps.evolution.enviarTexto(r.chat_jid, r.texto);
+    const mensagemId = await deps.evolution.enviarTexto(r.chat_jid, r.texto);
+    // O id separa esta mensagem das que ele escreveu à mão: só as dele ensinam estilo.
+    if (mensagemId) await deps.db.query("UPDATE rascunhos SET mensagem_id = $2 WHERE id = $1", [r.id, mensagemId]);
   } catch (err) {
     await deps.db.query("UPDATE rascunhos SET status = 'aguardando', decidido_em = NULL WHERE id = $1", [r.id]);
     return deps.avisar(`Não consegui enviar o #${r.id}: ${String(err).slice(0, 200)}`);
@@ -138,18 +178,20 @@ async function alternarChat(deps: DepsControle, nome: string, excluir: boolean):
   );
 }
 
-function sistemaAgente(dono: string): string {
+function sistemaAgente(dono: string, perfil: string): string {
   return `Você é o assistente pessoal de ${dono}. Você conversa com ele no chat dele consigo mesmo no WhatsApp e tem acesso às conversas dele pelas ferramentas.
 - Responda curto, em português, no estilo de WhatsApp (*negrito* para destacar). Sem preâmbulo.
 - Para falar de alguém, ache o contato com buscar_contato e leia a conversa antes de responder. Diga de onde tirou a informação (data da mensagem).
 - Você nunca envia mensagem a ninguém. Para responder um contato, use propor_resposta: ele recebe o rascunho e decide.
-- Se não achar a informação, diga que não achou. Não invente.`;
+- Se ele disser como prefere as coisas ("nunca marco antes das 9", "com cliente sempre formal"), guarde com registrar_regra.
+- Se não achar a informação, diga que não achou. Não invente.${perfil ? `\n\nPERFIL DE ${dono.toUpperCase()}:\n${perfil}` : ""}`;
 }
 
 /** Pedido em linguagem livre: vai para o Claude com as ferramentas de consulta. */
 async function atenderPedido(deps: DepsControle, texto: string): Promise<void> {
+  const perfil = repo.perfilEmTexto(await repo.lerPerfil(deps.db));
   const resposta = await deps.ia.agente({
-    sistema: sistemaAgente(deps.dono),
+    sistema: sistemaAgente(deps.dono, perfil),
     conteudo: `Agora: ${agoraPorExtenso(new Date(), deps.fuso)}\n\n${texto}`,
     ferramentas: criarFerramentas(deps),
   });
@@ -161,14 +203,17 @@ export function criarFerramentas(deps: DepsControle) {
   return [
     betaZodTool({
       name: "buscar_contato",
-      description: "Acha contatos e grupos pelo nome (ou parte dele). Devolve o jid, o nome e a memória sobre a pessoa.",
+      description: "Acha contatos e grupos pelo nome (ou parte dele). Devolve o jid, o nome e a ficha da pessoa.",
       inputSchema: z.object({ nome: z.string() }),
       run: async ({ nome }) => {
         const achados = await repo.buscarContatos(db, nome, 8);
         if (!achados.length) return "Nenhum contato com esse nome.";
         return achados
           .filter((c) => !c.excluido)
-          .map((c) => `${repo.nomeDe(c)}${c.grupo ? " (grupo)" : ""} — jid ${c.jid}${c.memoria ? `\n${c.memoria}` : ""}`)
+          .map((c) => {
+            const ficha = repo.fichaEmTexto(c);
+            return `${repo.nomeDe(c)}${c.grupo ? " (grupo)" : ""} — jid ${c.jid}${ficha ? `\n${ficha}` : ""}`;
+          })
           .join("\n\n");
       },
     }),
@@ -237,6 +282,15 @@ export function criarFerramentas(deps: DepsControle) {
       run: async ({ jid, fato }) => {
         await repo.lembrar(db, jid, [fato]);
         return "Guardado.";
+      },
+    }),
+    betaZodTool({
+      name: "registrar_regra",
+      description: "Guarda uma preferência ou regra do dono, que vale para tudo que o assistente escrever ou fizer.",
+      inputSchema: z.object({ regra: z.string().describe("Na primeira pessoa do dono: 'nunca marco reunião antes das 9h'") }),
+      run: async ({ regra }) => {
+        const id = await repo.acrescentarPerfil(db, "regra", regra);
+        return id ? `Regra #${id} guardada.` : "Essa regra já estava guardada.";
       },
     }),
     betaZodTool({

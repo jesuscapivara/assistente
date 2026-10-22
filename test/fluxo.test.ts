@@ -4,11 +4,12 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { tique } from "../src/agenda.js";
+import { aprenderComCorrecoes, conhecerContato } from "../src/conhecer.js";
 import { criarFerramentas, tratarComando, type DepsControle } from "../src/controle.js";
 import { abrirDb, migrar, type Db } from "../src/db.js";
 import { extrairChat } from "../src/extracao.js";
 import type { EntradaExtracao, Extracao, Ia } from "../src/ia.js";
-import { ingerir } from "../src/ingestao.js";
+import { ingerir, ingerirHistorico } from "../src/ingestao.js";
 import * as repo from "../src/repo.js";
 import { dadosDoResumo } from "../src/resumo.js";
 import type { Evolution } from "../src/whatsapp/evolution.js";
@@ -44,12 +45,20 @@ class IaFalsa implements Ia {
   extracoes: EntradaExtracao[] = [];
   resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false };
   textos: string[] = [];
+  sistemas: string[] = [];
+  estruturados: unknown[] = [];
+  pedidosEstruturados: string[] = [];
+  async estruturar(_schema: unknown, p: { conteudo: string }) {
+    this.pedidosEstruturados.push(p.conteudo);
+    return (this.estruturados.shift() ?? null) as any;
+  }
   async extrair(e: EntradaExtracao) {
     this.extracoes.push(e);
     return this.resposta;
   }
-  async escrever(p: { conteudo: string }) {
+  async escrever(p: { conteudo: string; sistema: string }) {
     this.textos.push(p.conteudo);
+    this.sistemas.push(p.sistema);
     return "Oi Fê! Amanhã te mando o orçamento.";
   }
   async agente() {
@@ -94,7 +103,7 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
   afterAll(async () => db?.end());
 
   beforeEach(async () => {
-    await db.query("TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado RESTART IDENTITY CASCADE");
+    await db.query("TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado, apelidos, perfil RESTART IDENTITY CASCADE");
     ia = new IaFalsa();
     whats = new WhatsFalso();
     avisos = [];
@@ -217,5 +226,118 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     await ing(msg(FERNANDA, "O orçamento da marcenaria ficou ótimo"));
     expect((await repo.buscarMensagens(db, "marcenaria"))[0].contato).toBe("Fernanda");
     expect((await repo.buscarContatos(db, "fern"))[0].jid).toBe(FERNANDA);
+  });
+
+  it("número e LID viram uma pessoa só, com as mensagens juntas", async () => {
+    const LID = "987654@lid";
+    const viaLid = msg(LID, "oi, é a Fernanda");
+    await ing(viaLid);
+    await repo.lembrar(db, LID, ["arquiteta"]);
+    expect((await repo.lerContato(db, LID))?.jid).toBe(LID);
+
+    // Chega uma mensagem com o número no SenderAlt: junta tudo no número.
+    const comAlt = msg(LID, "segue o projeto");
+    (comAlt.data.Info as any).SenderAlt = FERNANDA;
+    await ing(comAlt);
+    expect(await repo.lerContato(db, LID)).toBeNull();
+    const f = await repo.lerContato(db, FERNANDA);
+    expect(f?.memoria).toMatch(/arquiteta/);
+    const n = (await db.query("SELECT count(*)::int AS n FROM mensagens WHERE chat_jid = $1", [FERNANDA])).rows[0].n;
+    expect(n).toBe(2);
+
+    // Daí em diante, o LID sozinho já cai no número.
+    await ing(msg(LID, "e aí?"));
+    expect((await db.query("SELECT count(*)::int AS n FROM mensagens WHERE chat_jid = $1", [FERNANDA])).rows[0].n).toBe(3);
+  });
+
+  it("histórico grava em lote, com nome, sem virar extração nem gravar o chat do dono", async () => {
+    await ing(msg(GRUPO, "x", { grupo: true }));
+    await tratarComando(deps, `fora ${GRUPO.split("@")[0]}`);
+    const payload = {
+      event: "HistorySync",
+      data: {
+        Data: {
+          conversations: [
+            {
+              id: FERNANDA,
+              name: "Fernanda Moraes",
+              messages: [
+                { message: { key: { fromMe: false, ID: "H1" }, message: { conversation: "Oi Lucas" }, messageTimestamp: 1760000000 } },
+                { message: { key: { fromMe: true, ID: "H2" }, message: { conversation: "Oi Fê!" }, messageTimestamp: 1760000060 } },
+              ],
+            },
+            { id: DONO, messages: [{ message: { key: { fromMe: true, ID: "H3" }, message: { conversation: "nota" }, messageTimestamp: 1760000100 } }] },
+            { id: GRUPO, messages: [{ message: { key: { fromMe: false, ID: "H4" }, message: { conversation: "grupo" }, messageTimestamp: 1760000200 } }] },
+          ],
+        },
+      },
+    };
+    let estudos = 0;
+    const r = await ingerir(payload, { db, jidsDoDono: new Set([DONO]), aoComando: async () => {}, aoHistorico: async () => void estudos++ });
+    expect(r).toBe("historico");
+    expect(estudos).toBe(1);
+    const linhasDb = (await db.query("SELECT id, extraida FROM mensagens ORDER BY id")).rows;
+    expect(linhasDb).toEqual([
+      { id: "H1", extraida: true },
+      { id: "H2", extraida: true },
+    ]);
+    expect((await repo.lerContato(db, FERNANDA))?.nome_push).toBe("Fernanda Moraes");
+    expect(await repo.chatsParaExtrair(db, 0)).toEqual([]);
+    // Repetir o mesmo histórico não duplica.
+    expect(await ingerirHistorico(payload, { db, jidsDoDono: new Set([DONO]) })).toBe(0);
+  });
+
+  it("ficha da pessoa sai da conversa e entra no rascunho", async () => {
+    await ing(msg(FERNANDA, "Lucas, aprovamos o layout B!"));
+    ia.estruturados.push({
+      relacao: "cliente",
+      resumo: "Cliente do apartamento Bela Vista",
+      tom: "Cordial, sem gíria, chama de Fê",
+      assuntos_abertos: "orçamento da marcenaria",
+      fatos: ["mora em Porto Alegre"],
+    });
+    expect(await conhecerContato(deps, FERNANDA)).toBe(true);
+    const f = await repo.lerContato(db, FERNANDA);
+    expect(f).toMatchObject({ relacao: "cliente", tom: "Cordial, sem gíria, chama de Fê", assuntos_abertos: "orçamento da marcenaria" });
+    expect(f?.memoria).toMatch(/Porto Alegre/);
+    expect((await repo.contatosParaConhecer(db, 10, 1))).toEqual([]);
+
+    await tratarComando(deps, "regra: nunca prometo prazo por mensagem");
+    await criarFerramentas(deps).find((t) => t.name === "propor_resposta")!.run({ jid: FERNANDA, instrucao: "agradece" } as any);
+    expect(ia.textos.at(-1)).toMatch(/FICHA de Fernanda[\s\S]*Relação: cliente[\s\S]*chama de Fê/);
+    expect(ia.sistemas.at(-1)).toMatch(/Regras que ele mesmo deu[\s\S]*nunca prometo prazo por mensagem/);
+  });
+
+  it("aprende com a resposta que o dono escreveu no lugar do rascunho, e com os ajustes", async () => {
+    await ing(msg(FERNANDA, "Pode ser quinta?"));
+    const antigo = new Date(Date.now() - 3 * 3600_000);
+    // Rascunho descartado, e o dono escreveu a dele à mão logo depois.
+    const r1 = await repo.criarRascunho(db, FERNANDA, "Olá Fernanda! Quinta-feira está ótimo para mim. Abraços!", "aceitar quinta");
+    await repo.decidirRascunho(db, r1, "descartado");
+    await db.query("UPDATE rascunhos SET criado_em = $2 WHERE id = $1", [r1, antigo]);
+    await ing(msg(FERNANDA, "fechado, quinta 👍", { deMim: true, quando: new Date(antigo.getTime() + 10 * 60_000).toISOString() }));
+    // Rascunho enviado depois de um ajuste.
+    const r2 = await repo.criarRascunho(db, FERNANDA, "ok", "confirmar\nAjuste: sem 'abraços' no fim");
+    await repo.decidirRascunho(db, r2, "enviado");
+    await db.query("UPDATE rascunhos SET criado_em = $2 WHERE id = $1", [r2, antigo]);
+
+    ia.estruturados.push({ licoes: ["Mensagens curtas, sem saudação formal"] }, { licoes: ["Não termina com 'abraços'"] });
+    expect(await aprenderComCorrecoes(deps)).toBe(2);
+    expect(ia.pedidosEstruturados[0]).toMatch(/O QUE ELE MANDOU NO LUGAR:\nfechado, quinta/);
+    expect(ia.pedidosEstruturados[1]).toMatch(/AJUSTES QUE ELE PEDIU:\n- sem 'abraços'/);
+    const p = await repo.lerPerfil(db);
+    expect(p.licoes.map((l) => l.texto)).toEqual(["Mensagens curtas, sem saudação formal", "Não termina com 'abraços'"]);
+    // Não reaprende o mesmo rascunho.
+    expect(await aprenderComCorrecoes(deps)).toBe(0);
+
+    await tratarComando(deps, `esquece ${p.licoes[0].id}`);
+    expect((await repo.lerPerfil(db)).licoes).toHaveLength(1);
+  });
+
+  it("o ok guarda o id da mensagem enviada (o que separa o rascunho do que o dono escreveu)", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    const id = await repo.criarRascunho(db, FERNANDA, "oi Fê", "cumprimentar");
+    await tratarComando(deps, `ok ${id}`);
+    expect((await db.query("SELECT mensagem_id FROM rascunhos WHERE id = $1", [id])).rows[0].mensagem_id).toBe("E1");
   });
 });

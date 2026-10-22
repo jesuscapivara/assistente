@@ -11,12 +11,13 @@ export interface DepsRascunho {
   avisar(texto: string): Promise<void>;
 }
 
-function sistema(dono: string): string {
+function sistema(dono: string, perfil: string): string {
   return `Você escreve mensagens de WhatsApp em nome de ${dono}, como se fosse ele digitando no celular.
-- Imite os EXEMPLOS: tamanho, tom, pontuação, abreviações, uso de emoji e de maiúsculas. Com quem ele é informal, seja informal; com cliente, siga como ele fala com cliente.
+- Siga o PERFIL dele: as regras que ele deu valem acima de tudo, depois as lições das correções.
+- Imite os EXEMPLOS: tamanho, tom, pontuação, abreviações, uso de emoji e de maiúsculas. Com quem ele é informal, seja informal; com cliente, siga como ele fala com cliente (a ficha diz o tom com cada pessoa).
 - Use só o que está na conversa, na memória e no pedido. Não invente fato, valor, data nem compromisso.
 - Se faltar uma informação para a resposta, deixe [preencher: o que falta] no lugar.
-- Não se apresente, não diga que é assistente, não explique nada: responda só com o texto da mensagem, pronto para enviar.`;
+- Não se apresente, não diga que é assistente, não explique nada: responda só com o texto da mensagem, pronto para enviar.${perfil ? `\n\nPERFIL DE ${dono.toUpperCase()}:\n${perfil}` : ""}`;
 }
 
 /** Escreve a resposta na voz do dono. Não envia: quem envia é o "ok" no canal de controle. */
@@ -31,11 +32,14 @@ export async function escreverRascunho(
   const nome = repo.nomeDe(contato);
   const conversa = await repo.ultimasMensagens(deps.db, jid, 30);
   const exemplos = await repo.exemplosDoDono(deps.db, jid, 40);
+  // O perfil vai no system: muda pouco e fica no cache entre rascunhos.
+  const perfil = repo.perfilEmTexto(await repo.lerPerfil(deps.db));
+  const ficha = repo.fichaEmTexto(contato);
 
   const conteudo = [
     `Agora: ${agoraPorExtenso(new Date(), deps.fuso)}`,
     `Para: ${nome}${contato.grupo ? " (grupo)" : ""}`,
-    contato.memoria ? `O que ${deps.dono} sabe de ${nome}:\n${contato.memoria}` : "",
+    ficha ? `FICHA de ${nome}:\n${ficha}` : "",
     exemplos.length ? `EXEMPLOS de como ${deps.dono} escreve:\n${exemplos.map((e) => `> ${e}`).join("\n")}` : "",
     conversa.length ? `CONVERSA (mais recente por último):\n${linhas(conversa, deps.dono, nome, deps.fuso)}` : "",
     anterior ? `Rascunho anterior, que ${deps.dono} pediu para ajustar:\n${anterior}` : "",
@@ -44,7 +48,7 @@ export async function escreverRascunho(
     .filter(Boolean)
     .join("\n\n");
 
-  const texto = await deps.ia.escrever({ sistema: sistema(deps.dono), conteudo, esforco: "medium" });
+  const texto = await deps.ia.escrever({ sistema: sistema(deps.dono, perfil), conteudo, esforco: "medium" });
   if (!texto) throw new Error("não consegui escrever a resposta");
   return texto;
 }

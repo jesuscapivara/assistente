@@ -8,7 +8,13 @@ export interface Contato {
   grupo: boolean;
   excluido: boolean;
   memoria: string;
+  relacao: string | null;
+  resumo: string;
+  tom: string;
+  assuntos_abertos: string;
 }
+
+const COLUNAS_CONTATO = "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos";
 
 export interface Mensagem {
   id: string;
@@ -52,20 +58,75 @@ export async function garantirContato(
     `INSERT INTO contatos (jid, grupo, nome_push) VALUES ($1, $2, $3)
      ON CONFLICT (jid) DO UPDATE
        SET nome_push = COALESCE(EXCLUDED.nome_push, contatos.nome_push), atualizado_em = now()
-     RETURNING jid, nome, nome_push, grupo, excluido, memoria`,
+     RETURNING ${COLUNAS_CONTATO}`,
     [jid, dados.grupo, dados.nomePush ?? null],
   );
   return r.rows[0];
 }
 
-/** Grava a mensagem; `false` quando o webhook repetiu uma que já estava lá. */
-export async function gravarMensagem(db: Db, m: MensagemRecebida, texto: string): Promise<boolean> {
+/**
+ * Grava a mensagem; `false` quando o webhook repetiu uma que já estava lá.
+ * `extraida` já marcada é para o histórico: conversa antiga ensina quem é quem, mas
+ * não pode virar aviso de compromisso de meses atrás.
+ */
+export async function gravarMensagem(db: Db, m: MensagemRecebida, texto: string, extraida = false): Promise<boolean> {
   const r = await db.query(
-    `INSERT INTO mensagens (id, chat_jid, remetente_jid, remetente_nome, de_mim, tipo, texto, enviada_em)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING`,
-    [m.id, m.chatJid, m.remetenteJid, m.remetenteNome, m.deMim, m.tipo, texto, m.enviadaEm],
+    `INSERT INTO mensagens (id, chat_jid, remetente_jid, remetente_nome, de_mim, tipo, texto, enviada_em, extraida)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
+    [m.id, m.chatJid, m.remetenteJid, m.remetenteNome, m.deMim, m.tipo, texto, m.enviadaEm, extraida],
   );
   return (r.rowCount ?? 0) > 0;
+}
+
+/** O endereço com que a pessoa é guardada (o número, quando já se sabe). */
+export async function resolverJid(db: Db, jid: string): Promise<string> {
+  const r = await db.query<{ principal: string }>("SELECT principal FROM apelidos WHERE jid = $1", [jid]);
+  return r.rows[0]?.principal ?? jid;
+}
+
+/**
+ * Liga o LID ao número e junta as duas conversas, se as duas já existirem: mensagens,
+ * compromissos e rascunhos passam para o número, e os fatos se somam.
+ */
+export async function registrarApelido(db: Db, a: string, b: string): Promise<string> {
+  const principal = a.endsWith("@s.whatsapp.net") ? a : b;
+  const apelido = principal === a ? b : a;
+  if (apelido === principal || !apelido.endsWith("@lid")) return principal;
+  const ja = await db.query("SELECT 1 FROM apelidos WHERE jid = $1", [apelido]);
+  if (ja.rowCount) return principal;
+
+  const c = await db.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("INSERT INTO apelidos (jid, principal) VALUES ($1, $2) ON CONFLICT DO NOTHING", [apelido, principal]);
+    const velho = (await c.query<Contato>(`SELECT ${COLUNAS_CONTATO} FROM contatos WHERE jid = $1`, [apelido])).rows[0];
+    if (velho) {
+      await c.query(
+        `INSERT INTO contatos (jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos)
+         VALUES ($1, $2, $3, FALSE, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (jid) DO UPDATE SET
+           nome = COALESCE(contatos.nome, EXCLUDED.nome),
+           nome_push = COALESCE(contatos.nome_push, EXCLUDED.nome_push),
+           excluido = contatos.excluido OR EXCLUDED.excluido,
+           memoria = trim(both E'\n' FROM contatos.memoria || E'\n' || EXCLUDED.memoria),
+           relacao = COALESCE(contatos.relacao, EXCLUDED.relacao),
+           resumo = CASE WHEN contatos.resumo = '' THEN EXCLUDED.resumo ELSE contatos.resumo END,
+           tom = CASE WHEN contatos.tom = '' THEN EXCLUDED.tom ELSE contatos.tom END`,
+        [principal, velho.nome, velho.nome_push, velho.excluido, velho.memoria, velho.relacao, velho.resumo, velho.tom, velho.assuntos_abertos],
+      );
+      for (const t of ["mensagens", "compromissos", "rascunhos"]) {
+        await c.query(`UPDATE ${t} SET chat_jid = $2 WHERE chat_jid = $1`, [apelido, principal]);
+      }
+      await c.query("DELETE FROM contatos WHERE jid = $1", [apelido]);
+    }
+    await c.query("COMMIT");
+  } catch (err) {
+    await c.query("ROLLBACK");
+    throw err;
+  } finally {
+    c.release();
+  }
+  return principal;
 }
 
 export async function registrarEnviada(db: Db, id: string | null): Promise<void> {
@@ -111,16 +172,15 @@ export async function marcarExtraidas(db: Db, chatJid: string, ate: Date): Promi
 }
 
 export async function lerContato(db: Db, jid: string): Promise<Contato | null> {
-  const r = await db.query<Contato>("SELECT jid, nome, nome_push, grupo, excluido, memoria FROM contatos WHERE jid = $1", [
-    jid,
-  ]);
+  const r = await db.query<Contato>(`SELECT ${COLUNAS_CONTATO} FROM contatos WHERE jid = $1`, [jid]);
   return r.rows[0] ?? null;
 }
 
 /** Busca por nome (ou trecho do número), nos dois nomes que o contato pode ter. */
 export async function buscarContatos(db: Db, termo: string, limite = 8): Promise<Contato[]> {
   const r = await db.query<Contato>(
-    `SELECT c.jid, c.nome, c.nome_push, c.grupo, c.excluido, c.memoria FROM contatos c
+    `SELECT c.jid, c.nome, c.nome_push, c.grupo, c.excluido, c.memoria, c.relacao, c.resumo, c.tom, c.assuntos_abertos
+     FROM contatos c
      LEFT JOIN LATERAL (SELECT max(enviada_em) AS ultima FROM mensagens WHERE chat_jid = c.jid) u ON TRUE
      WHERE c.nome ILIKE $1 OR c.nome_push ILIKE $1 OR c.jid ILIKE $1
      ORDER BY u.ultima DESC NULLS LAST LIMIT $2`,
@@ -280,4 +340,106 @@ export async function apagarAntigas(db: Db, dias: number): Promise<number> {
   const r = await db.query("DELETE FROM mensagens WHERE enviada_em < now() - make_interval(days => $1)", [dias]);
   await db.query("DELETE FROM enviadas WHERE criada_em < now() - interval '30 days'");
   return r.rowCount ?? 0;
+}
+
+export interface Ficha {
+  relacao?: string | null;
+  resumo?: string;
+  tom?: string;
+  assuntos_abertos?: string;
+}
+
+const RELACOES = new Set(["cliente", "familia", "amigo", "trabalho", "fornecedor", "outro"]);
+
+/** Atualiza só o que veio preenchido: uma leitura curta não apaga o que uma longa já sabia. */
+export async function atualizarFicha(db: Db, jid: string, f: Ficha): Promise<void> {
+  const relacao = f.relacao && RELACOES.has(f.relacao) ? f.relacao : null;
+  await db.query(
+    `UPDATE contatos SET
+       relacao = COALESCE($2, relacao),
+       resumo = COALESCE(NULLIF($3, ''), resumo),
+       tom = COALESCE(NULLIF($4, ''), tom),
+       assuntos_abertos = COALESCE($5, assuntos_abertos),
+       ficha_em = now(), atualizado_em = now()
+     WHERE jid = $1`,
+    [jid, relacao, f.resumo ?? "", f.tom ?? "", f.assuntos_abertos ?? null],
+  );
+}
+
+/**
+ * Contatos que pedem ficha nova: nunca lidos, ou com conversa nova desde a última
+ * leitura. Os mais ativos primeiro, porque são os que o dono mais vai consultar.
+ */
+export async function contatosParaConhecer(db: Db, limite: number, minimoMensagens = 6): Promise<string[]> {
+  const r = await db.query<{ jid: string }>(
+    `SELECT c.jid FROM contatos c
+     JOIN mensagens m ON m.chat_jid = c.jid
+     WHERE NOT c.excluido AND (c.ficha_em IS NULL OR m.enviada_em > c.ficha_em)
+     GROUP BY c.jid
+     HAVING count(*) >= $2
+     ORDER BY count(*) DESC LIMIT $1`,
+    [limite, minimoMensagens],
+  );
+  return r.rows.map((x) => x.jid);
+}
+
+export interface Perfil {
+  regras: { id: number; texto: string }[];
+  licoes: { id: number; texto: string }[];
+  gerado: string;
+}
+
+export async function lerPerfil(db: Db): Promise<Perfil> {
+  const r = await db.query<{ id: number; tipo: string; texto: string }>(
+    "SELECT id, tipo, texto FROM perfil WHERE ativo ORDER BY id",
+  );
+  return {
+    regras: r.rows.filter((x) => x.tipo === "regra"),
+    licoes: r.rows.filter((x) => x.tipo === "licao").slice(-40),
+    gerado: r.rows.filter((x) => x.tipo === "gerado").at(-1)?.texto ?? "",
+  };
+}
+
+/** Acrescenta regra ou lição, sem repetir texto igual. */
+export async function acrescentarPerfil(db: Db, tipo: "regra" | "licao", texto: string): Promise<number | null> {
+  const t = texto.trim();
+  if (!t) return null;
+  const dup = await db.query("SELECT 1 FROM perfil WHERE ativo AND tipo = $1 AND lower(texto) = lower($2)", [tipo, t]);
+  if (dup.rowCount) return null;
+  const r = await db.query<{ id: number }>("INSERT INTO perfil (tipo, texto) VALUES ($1, $2) RETURNING id", [tipo, t]);
+  return r.rows[0].id;
+}
+
+export async function trocarPerfilGerado(db: Db, texto: string): Promise<void> {
+  await db.query("UPDATE perfil SET ativo = FALSE WHERE tipo = 'gerado' AND ativo");
+  await db.query("INSERT INTO perfil (tipo, texto) VALUES ('gerado', $1)", [texto]);
+}
+
+export async function desativarPerfil(db: Db, id: number): Promise<boolean> {
+  const r = await db.query("UPDATE perfil SET ativo = FALSE WHERE id = $1 AND tipo <> 'gerado'", [id]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** O perfil em texto, como entra nos prompts: regra do dono antes de tudo. */
+export function perfilEmTexto(p: Perfil): string {
+  return [
+    p.regras.length ? `Regras que ele mesmo deu (valem acima de tudo):\n${p.regras.map((r) => `- ${r.texto}`).join("\n")}` : "",
+    p.licoes.length ? `Lições das correções dele:\n${p.licoes.map((r) => `- ${r.texto}`).join("\n")}` : "",
+    p.gerado ? `Retrato dele (escrito a partir das mensagens):\n${p.gerado}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** A ficha em texto, como entra nos prompts. */
+export function fichaEmTexto(c: Contato): string {
+  return [
+    c.relacao ? `Relação: ${c.relacao}` : "",
+    c.resumo ? `Quem é: ${c.resumo}` : "",
+    c.tom ? `Como o dono fala com essa pessoa: ${c.tom}` : "",
+    c.assuntos_abertos ? `Assuntos em aberto: ${c.assuntos_abertos}` : "",
+    c.memoria ? `Fatos:\n${c.memoria}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

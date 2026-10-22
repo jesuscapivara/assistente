@@ -5,6 +5,8 @@ export interface Tarefas {
   extrair(): Promise<unknown>;
   resumo(): Promise<void>;
   limpar(): Promise<unknown>;
+  /** Fichas, lições e retrato: de madrugada, quando ninguém está esperando resposta. */
+  estudar?(): Promise<unknown>;
 }
 
 /**
@@ -59,6 +61,10 @@ export async function tique(opts: {
     if (hora >= "03:00" && (await lerEstado(opts.db, "limpeza:ultimo_dia")) !== dia) {
       await gravarEstado(opts.db, "limpeza:ultimo_dia", dia);
       await opts.tarefas.limpar();
+    }
+    if (opts.tarefas.estudar && hora >= "04:00" && (await lerEstado(opts.db, "estudo:ultimo_dia")) !== dia) {
+      await gravarEstado(opts.db, "estudo:ultimo_dia", dia);
+      await opts.tarefas.estudar();
     }
   } catch (err) {
     opts.log({ err: String(err) }, "agenda falhou");

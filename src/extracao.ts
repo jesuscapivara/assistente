@@ -70,7 +70,7 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
     dono: deps.dono,
     contato: nome,
     grupo: contato.grupo,
-    memoria: contato.memoria,
+    memoria: repo.fichaEmTexto(contato),
     anteriores: linhas(anteriores, deps.dono, nome, deps.fuso),
     novas: linhas(novas, deps.dono, nome, deps.fuso),
   });

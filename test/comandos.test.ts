@@ -17,6 +17,11 @@ describe("lerComando", () => {
     ["fora Grupo da Família", { tipo: "excluir", nome: "Grupo da Família" }],
     ["volta Pedro", { tipo: "incluir", nome: "Pedro" }],
     ["resumo", { tipo: "resumo" }],
+    ["perfil", { tipo: "perfil" }],
+    ["regra: nunca marco nada antes das 9", { tipo: "regra", texto: "nunca marco nada antes das 9" }],
+    ["esquece 4", { tipo: "esquecer", id: 4 }],
+    ["esquece a regra #4", { tipo: "esquecer", id: 4 }],
+    ["estuda", { tipo: "estudar" }],
   ])("%s", (texto, esperado) => {
     expect(lerComando(texto)).toEqual(esperado);
   });

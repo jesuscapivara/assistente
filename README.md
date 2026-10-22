@@ -16,8 +16,26 @@ WhatsApp pessoal ── Evolution GO (instância própria, mesma engine do KoreO
                         ├─ extração (Claude): compromissos, promessas e fatos de cada pessoa,
                         │   quando a conversa assenta (3 min sem mensagem)
                         ├─ resumo da manhã (07:30): agenda, promessas, quem espera resposta
+                        ├─ estudo (madrugada, e logo depois do pareamento): ficha de cada pessoa,
+                        │   seu retrato e as lições das suas correções
                         └─ canal de controle: o seu chat consigo mesmo ("mensagem para você")
 ```
+
+### Como ele aprende você
+
+- **Histórico do pareamento**: ao conectar, o WhatsApp manda as conversas recentes. Ele grava
+  tudo (sem transformar em aviso de compromisso velho) e, 3 minutos depois, lê para montar as
+  fichas e o seu retrato. Você recebe um aviso quando terminar.
+- **Ficha de cada pessoa**: relação (cliente, família, amigo, trabalho, fornecedor), quem é,
+  **como você fala com ela**, assuntos em aberto e fatos. Atualiza toda madrugada para quem
+  teve conversa nova.
+- **Seu perfil**, em três camadas, nesta ordem de autoridade:
+  1. *regras* que você dá (`regra nunca marco nada antes das 9`), que valem acima de tudo;
+  2. *lições* das suas correções: quando você descarta um rascunho e escreve a sua versão à
+     mão, ou pede um `ajusta`, ele compara e tira regras de estilo;
+  3. o *retrato* que ele escreve a partir das suas mensagens (semanal).
+- **Número e LID juntos**: a mesma pessoa pelo número e pelo identificador novo do WhatsApp
+  vira uma conversa só, assim que um evento traz os dois.
 
 Tudo que o assistente diz chega no seu chat consigo mesmo, começando com 🤖.
 
@@ -34,6 +52,11 @@ Tudo que o assistente diz chega no seu chat consigo mesmo, começando com 🤖.
 | `fora Grupo da Família` | tira a conversa ou o grupo do assistente e **apaga** o que já tinha |
 | `volta Grupo da Família` | põe de volta (a partir de agora) |
 | `resumo` | o resumo do dia, na hora |
+| `perfil` | o que ele sabe de você (regras, lições e retrato) |
+| `regra nunca marco nada antes das 9` | uma regra sua, que vale para tudo |
+| `esquece 4` | apaga a regra ou lição 4 |
+| `estuda` | atualiza agora as fichas e o seu retrato |
+| 🎙️ áudio | qualquer pedido falado (com `OPENAI_API_KEY`); ele mostra o que entendeu antes |
 | `ajuda` | a lista de comandos |
 
 Rascunho com `[preencher: …]` não sai: ajuste antes.

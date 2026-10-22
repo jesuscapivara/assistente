@@ -16,7 +16,11 @@ export function criarServidor(opts: {
   webhookToken: string;
   aoEvento(payload: unknown): Promise<unknown>;
 }): FastifyInstance {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" }, bodyLimit: 25 * 1024 * 1024 });
+  const app = Fastify({
+    logger: { level: process.env.LOG_LEVEL ?? "info" },
+    // O histórico do pareamento chega em eventos grandes.
+    bodyLimit: 100 * 1024 * 1024,
+  });
 
   app.get("/saude", async () => ({ ok: true }));
 
