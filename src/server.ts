@@ -14,8 +14,9 @@ export function ocultarToken(url: string): string {
 
 export interface OpcoesPainel {
   token: string;
-  pagina(base: string): Promise<string>;
-  acao(campos: Record<string, string>): Promise<void>;
+  /** `aviso`: o resultado da última ação, mostrado uma vez no alto da página. */
+  pagina(base: string, aviso?: string): Promise<string>;
+  acao(campos: Record<string, string>): Promise<string | void>;
 }
 
 /**
@@ -64,14 +65,19 @@ export function criarServidor(opts: {
 
   const painel = opts.painel;
   if (painel) {
+    // Um dono só: o resultado da última ação fica aqui até a página recarregar. Na URL,
+    // iria para o log com o nome das pessoas.
+    let aviso = "";
     app.get<{ Params: { token: string } }>("/painel/:token", async (req, reply) => {
       if (!tokenConfere(req.params.token, painel.token)) return reply.code(404).send();
       reply.header("Cache-Control", "no-store").header("X-Robots-Tag", "noindex").type("text/html; charset=utf-8");
-      return painel.pagina(`/painel/${req.params.token}`);
+      const mostrar = aviso;
+      aviso = "";
+      return painel.pagina(`/painel/${req.params.token}`, mostrar);
     });
     app.post<{ Params: { token: string }; Body: Record<string, string> }>("/painel/:token/acao", async (req, reply) => {
       if (!tokenConfere(req.params.token, painel.token)) return reply.code(404).send();
-      await painel.acao(req.body ?? {});
+      aviso = (await painel.acao(req.body ?? {}).catch((err) => `Não deu certo: ${String(err).slice(0, 200)}`)) || "";
       // Volta para a página: recarregar não repete a ação.
       return reply.redirect(`/painel/${req.params.token}`, 303);
     });

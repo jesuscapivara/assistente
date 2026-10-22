@@ -81,6 +81,23 @@ describe("comandoDoPainel", () => {
     expect(comandoDoPainel({ acao: "autonomia", jid: "x@s.whatsapp.net", nivel: "" })).toEqual({ autonomia: { jid: "x@s.whatsapp.net", nivel: null } });
   });
 
+  it("itens do dia: resolvi, adia e ignora com o alvo; responder e ajustar", () => {
+    expect(comandoDoPainel({ acao: "pendencia", tipo: "espera", jid: "x@s.whatsapp.net", titulo: "Ana", verbo: "adia", quando: "sábado" })).toEqual({
+      pendencia: { item: { letra: "", tipo: "espera", titulo: "Ana", jid: "x@s.whatsapp.net", compromissoId: undefined, emailId: undefined }, acao: "adia", quando: "sábado" },
+    });
+    expect(comandoDoPainel({ acao: "pendencia", tipo: "compromisso", compromissoId: "7", verbo: "resolvi", quando: "amanhã" })).toMatchObject({
+      pendencia: { item: { tipo: "compromisso", compromissoId: 7 }, acao: "resolvi", quando: undefined },
+    });
+    expect(comandoDoPainel({ acao: "responder", jid: "x@s.whatsapp.net", instrucao: " sábado às 10h " })).toEqual({ responder: { jid: "x@s.whatsapp.net", instrucao: "sábado às 10h" } });
+    expect(comandoDoPainel({ acao: "ajustar", id: "4", instrucao: "mais curto" })).toEqual({ texto: "ajusta 4 mais curto" });
+    expect(comandoDoPainel({ acao: "limpar_caderno" })).toEqual({ limparCaderno: true });
+    // Alvo que não bate com o tipo, verbo ou tipo desconhecido: nada acontece.
+    expect(comandoDoPainel({ acao: "pendencia", tipo: "espera", verbo: "resolvi" })).toBeNull();
+    expect(comandoDoPainel({ acao: "pendencia", tipo: "compromisso", compromissoId: "x", verbo: "resolvi" })).toBeNull();
+    expect(comandoDoPainel({ acao: "pendencia", tipo: "tarefa", verbo: "resolvi" })).toBeNull();
+    expect(comandoDoPainel({ acao: "pendencia", tipo: "espera", jid: "x", verbo: "apagar" })).toBeNull();
+  });
+
   it("recusa id que não é número e ação desconhecida", () => {
     expect(comandoDoPainel({ acao: "enviar", id: "1; drop" })).toBeNull();
     expect(comandoDoPainel({ acao: "autonomia", jid: "x", nivel: "9" })).toBeNull();

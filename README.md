@@ -91,9 +91,12 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `caderno` · `esquece caderno` | o que ele está acompanhando entre vocês; zera |
 | `resumo` · `ajuda` | |
 
-O **painel web** (opcional) mostra a mesma coisa numa tela: rascunhos para aprovar,
-compromissos, quem espera resposta, pessoas com o nível de autonomia de cada uma, e o seu
-perfil. Os botões viram os mesmos comandos.
+O **painel web** é o cartão da manhã ao vivo, no mesmo desenho, com um botão em cada item:
+rascunhos para enviar, ajustar ou descartar; compromissos e quem espera resposta com
+Resolvi, Adiar e Ignorar, e Responder; "Ficou para trás"; o KoreOS; o que os outros ficaram
+de fazer; o gasto por função; o caderno, as regras e as lições (com Apagar); e a autonomia
+de cada pessoa. Não chama modelo nenhum. Os comandos de sempre respondem no WhatsApp; as
+ações dos itens confirmam na própria tela.
 
 ## Instalação na VM de staging
 
@@ -138,8 +141,11 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
 - **KoreOS**: gere um token MCP no KoreOS (Configurações > Integrações > MCP) e preencha
   `KOREOS_MCP_URL=https://<api do KoreOS>/api/mcp/server` e `KOREOS_MCP_TOKEN=kore_mcp_…`.
 - **Painel**: `PAINEL_TOKEN` (24+ caracteres). O compose publica a porta só em
-  `127.0.0.1:3100` da VM: acesse por túnel (`ssh -L 3100:127.0.0.1:3100 vm` e abra
-  `http://localhost:3100/painel/<PAINEL_TOKEN>`) ou ponha atrás do proxy da VM com HTTPS.
+  `127.0.0.1:3100` da VM, e o acesso é pelo **Tailscale**: `tailscale serve --bg 3100` na VM
+  dá um endereço `https://<máquina>.<rede>.ts.net` que só existe para os aparelhos da sua
+  rede do Tailscale. Abra `https://<máquina>.<rede>.ts.net/painel/<PAINEL_TOKEN>`. Nenhuma
+  porta pública, nenhum DNS. Sem Tailscale, por túnel SSH:
+  `ssh -L 3100:127.0.0.1:3100 vm` e `http://localhost:3100/painel/<PAINEL_TOKEN>`.
 
 ### Backup
 

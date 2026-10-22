@@ -446,8 +446,8 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
   it("painel: página com a fila, e as rotas exigem o token", async () => {
     await ing(msg(FERNANDA, "oi"));
     await repo.criarRascunho(db, FERNANDA, "Oi Fê <script>", "x");
-    const html = await paginaDoPainel(db, "/painel/T", { fuso: SP, dono: "Lucas", niveis: ["a", "b", "c", "d"], padrao: 0 });
-    expect(html).toContain("#1 · Fernanda");
+    const html = await paginaDoPainel(deps, "/painel/T", { fuso: SP, dono: "Lucas", niveis: ["a", "b", "c", "d"], padrao: 0 });
+    expect(html).toContain("#1 para Fernanda");
     expect(html).toContain("Oi Fê &lt;script&gt;");
     expect(html).not.toContain("<script>");
 
@@ -455,7 +455,7 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     const app = criarServidor({
       webhookToken: "w".repeat(16),
       aoEvento: async () => {},
-      painel: { token: "t".repeat(24), pagina: async () => "<html>ok</html>", acao: async (c) => void acoes.push(c) },
+      painel: { token: "t".repeat(24), pagina: async (_b, aviso) => `<html>${aviso ?? ""}</html>`, acao: async (c) => (acoes.push(c), "Baixa dada.") },
     });
     expect((await app.inject({ method: "GET", url: "/painel/errado" })).statusCode).toBe(404);
     const pag = await app.inject({ method: "GET", url: `/painel/${"t".repeat(24)}` });
@@ -469,6 +469,9 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     });
     expect(post.statusCode).toBe(303);
     expect(acoes).toEqual([{ acao: "enviar", id: "1" }]);
+    // A confirmação aparece uma vez, no carregamento seguinte, e some.
+    expect((await app.inject({ method: "GET", url: `/painel/${"t".repeat(24)}` })).body).toBe("<html>Baixa dada.</html>");
+    expect((await app.inject({ method: "GET", url: `/painel/${"t".repeat(24)}` })).body).toBe("<html></html>");
     expect((await app.inject({ method: "POST", url: "/painel/errado/acao", payload: "acao=pausa", headers: { "content-type": "application/x-www-form-urlencoded" } })).statusCode).toBe(404);
     await app.close();
   });

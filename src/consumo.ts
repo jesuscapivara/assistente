@@ -28,12 +28,21 @@ export function registrarUso(db: Db, u: Uso): void {
     .catch(() => undefined);
 }
 
-function dolar(v: number): string {
+export function dolar(v: number): string {
   return `US$ ${v < 0.01 && v > 0 ? v.toFixed(4) : v.toFixed(2)}`;
 }
 
-/** O comando `custo`: hoje, 7 dias e 30 dias, e por função nos 7 dias. */
-export async function relatorioDeCusto(db: Db): Promise<string> {
+export interface ResumoDeCusto {
+  dia: number;
+  semana: number;
+  mes: number;
+  /** Por função, nos 7 dias, do mais caro ao mais barato. */
+  porFuncao: { funcao: string; custo: number; chamadas: number }[];
+  desconhecidos: string[];
+}
+
+/** Os números do gasto: o comando `custo` e o painel saem daqui. */
+export async function resumoDeCusto(db: Db): Promise<ResumoDeCusto> {
   const r = await db.query<{
     funcao: string;
     modelo: string;
@@ -51,7 +60,6 @@ export async function relatorioDeCusto(db: Db): Promise<string> {
      FROM consumo WHERE criado_em > now() - interval '30 days'
      GROUP BY funcao, modelo, janela`,
   );
-  if (!r.rows.length) return "Ainda não há chamadas registradas.";
   const linhas = r.rows.map((x) => ({
     ...x,
     custo: custoDe({
@@ -68,16 +76,25 @@ export async function relatorioDeCusto(db: Db): Promise<string> {
     const atual = porFuncao.get(x.funcao) ?? { custo: 0, chamadas: 0 };
     porFuncao.set(x.funcao, { custo: atual.custo + x.custo, chamadas: atual.chamadas + x.chamadas });
   }
-  const desconhecidos = [...new Set(linhas.map((x) => x.modelo).filter((m) => !PRECOS[m]))];
+  return {
+    dia: soma(["dia"]),
+    semana: soma(["dia", "semana"]),
+    mes: soma(["dia", "semana", "mes"]),
+    porFuncao: [...porFuncao.entries()].map(([funcao, v]) => ({ funcao, ...v })).sort((a, b) => b.custo - a.custo),
+    desconhecidos: [...new Set(linhas.map((x) => x.modelo).filter((m) => !PRECOS[m]))],
+  };
+}
+
+/** O comando `custo`: hoje, 7 dias e 30 dias, e por função nos 7 dias. */
+export async function relatorioDeCusto(db: Db): Promise<string> {
+  const c = await resumoDeCusto(db);
+  if (!c.mes && !c.porFuncao.length) return "Ainda não há chamadas registradas.";
   return [
-    `*Gasto com o Claude*\nHoje: ${dolar(soma(["dia"]))}\n7 dias: ${dolar(soma(["dia", "semana"]))}\n30 dias: ${dolar(soma(["dia", "semana", "mes"]))}`,
-    porFuncao.size
-      ? `*Por função (7 dias)*\n${[...porFuncao.entries()]
-          .sort((a, b) => b[1].custo - a[1].custo)
-          .map(([f, v]) => `• ${f}: ${dolar(v.custo)} (${v.chamadas} chamadas)`)
-          .join("\n")}`
+    `*Gasto com o Claude*\nHoje: ${dolar(c.dia)}\n7 dias: ${dolar(c.semana)}\n30 dias: ${dolar(c.mes)}`,
+    c.porFuncao.length
+      ? `*Por função (7 dias)*\n${c.porFuncao.map((f) => `• ${f.funcao}: ${dolar(f.custo)} (${f.chamadas} chamadas)`).join("\n")}`
       : "",
-    desconhecidos.length ? `_Preço estimado como Sonnet para: ${desconhecidos.join(", ")}_` : "",
+    c.desconhecidos.length ? `_Preço estimado como Sonnet para: ${c.desconhecidos.join(", ")}_` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -1,6 +1,6 @@
 {
   "name": "assistente",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Assistente pessoal ligado ao WhatsApp do Lucas",
   "scripts": {
     "dev": "tsx watch src/index.ts",

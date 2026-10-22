@@ -4,12 +4,14 @@ import { desenharCartao, planoDoCartao } from "./cartao.js";
 import { expediente, googleLigado, jidsDoDono, lerConfig, urlInterna } from "./config.js";
 import { estudar } from "./conhecer.js";
 import { registrarUso } from "./consumo.js";
-import { NIVEIS, tratarComando, type DepsControle } from "./controle.js";
+import { depsDaPauta, NIVEIS, tratarComando, type DepsControle } from "./controle.js";
+import { limparCaderno } from "./memoria.js";
+import { proporResposta } from "./rascunho.js";
 import { abrirDb, migrar } from "./db.js";
 import { lerSituacoesPendentes, rodadaDeExtracao } from "./extracao.js";
 import { criarKoreosDireto } from "./koreos.js";
 import { guardarImagem } from "./midia.js";
-import { gravarPauta, pautaDoCartao } from "./pauta.js";
+import { cuidarDoItem, gravarPauta, pautaDoCartao } from "./pauta.js";
 import { criarGoogle } from "./google.js";
 import { criarIa } from "./ia.js";
 import { ingerir } from "./ingestao.js";
@@ -189,12 +191,30 @@ const app = criarServidor({
   painel: cfg.PAINEL_TOKEN
     ? {
         token: cfg.PAINEL_TOKEN,
-        pagina: (b) => paginaDoPainel(db, b, { fuso: cfg.FUSO, dono: cfg.DONO_NOME, niveis: NIVEIS, padrao: cfg.AUTONOMIA_PADRAO }),
+        pagina: (b, aviso) => paginaDoPainel(base, b, { fuso: cfg.FUSO, dono: cfg.DONO_NOME, niveis: NIVEIS, padrao: cfg.AUTONOMIA_PADRAO }, aviso),
         acao: async (campos) => {
           const c = comandoDoPainel(campos);
-          if (!c) return;
-          if ("texto" in c) return comando(c.texto);
-          await repo.definirAutonomia(db, c.autonomia.jid, c.autonomia.nivel);
+          if (!c) return "Não entendi esse botão.";
+          // Os comandos de sempre respondem no WhatsApp, que é o registro do que foi feito.
+          if ("texto" in c) {
+            await comando(c.texto);
+            return "Feito. A confirmação foi para o seu WhatsApp.";
+          }
+          if ("autonomia" in c) {
+            await repo.definirAutonomia(db, c.autonomia.jid, c.autonomia.nivel);
+            return "Nível de autonomia salvo.";
+          }
+          if ("limparCaderno" in c) {
+            await limparCaderno(db);
+            return "Caderno zerado.";
+          }
+          if ("responder" in c) {
+            const ct = await repo.lerContato(db, c.responder.jid);
+            if (!ct || ct.excluido) return "Essa conversa não está mais no assistente.";
+            const id = await proporResposta(depsControle, ct.jid, c.responder.instrucao || `Responder ao que está pendente: ${ct.situacao || "a última mensagem"}.`);
+            return `Rascunho #${id} pronto: está no alto da página e no seu WhatsApp.`;
+          }
+          return cuidarDoItem(depsDaPauta(depsControle), c.pendencia.item, c.pendencia.acao, c.pendencia.quando);
         },
       }
     : undefined,
