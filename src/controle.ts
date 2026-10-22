@@ -2,7 +2,7 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { gravarEstado, lerEstado, type Db } from "./db.js";
 import { estudar } from "./conhecer.js";
-import { ferramentasGoogle } from "./ferramentas_google.js";
+import { enderecosEm, ferramentasGoogle } from "./ferramentas_google.js";
 import { agoraPorExtenso, dataCurta, linhas } from "./formato.js";
 import type { Google } from "./google.js";
 import type { Ia } from "./ia.js";
@@ -472,7 +472,7 @@ function sistemaAgente(dono: string, perfil: string, extras: string[]): string {
   return `Você é o assistente pessoal de ${dono}. Você conversa com ele no chat dele consigo mesmo no WhatsApp e tem acesso às conversas dele pelas ferramentas.
 - Responda curto, em português, no estilo de WhatsApp (*negrito* para destacar). Sem preâmbulo.
 - Para falar de alguém, ache o contato com buscar_contato e leia a conversa antes de responder. Diga de onde tirou a informação (data da mensagem).
-- Você nunca envia mensagem a ninguém. Para responder um contato, use propor_resposta: ele recebe o rascunho e decide.
+- Você nunca envia mensagem de WhatsApp a ninguém. Para responder um contato, use propor_resposta: ele recebe o rascunho e decide.
 - Se ele disser como prefere as coisas ("nunca marco antes das 9", "com cliente sempre formal"), guarde com registrar_regra.
 - Mensagem curta ("sim", "pode", "esse", "o segundo", "faz isso") responde ao que está na CONVERSA RECENTE e no CADERNO: resolva por eles e aja. Só pergunte se de fato houver duas leituras.
 - Contato sem nome: diga quem é pelo que a ficha e a conversa mostram ("o cliente da obra do Largo"), nunca só o número.
@@ -496,9 +496,16 @@ export async function responderPedido(deps: DepsControle, texto: string): Promis
   const extras: string[] = [];
   const ferramentas: any[] = criarFerramentas(deps);
   if (deps.google) {
-    ferramentas.push(...ferramentasGoogle({ google: deps.google, fuso: deps.fuso, expediente: deps.expediente ?? { inicioH: 9, fimH: 18 } }));
+    ferramentas.push(
+      ...ferramentasGoogle({
+        google: deps.google,
+        fuso: deps.fuso,
+        expediente: deps.expediente ?? { inicioH: 9, fimH: 18 },
+        enderecosDoDono: () => enderecosDoDono(deps.db),
+      }),
+    );
     extras.push(
-      "Você vê a agenda e o Gmail dele. Para marcar algo, veja horários livres antes e crie o evento só quando ele pedir (se ele pedir reunião online/remota ou Meet, passe gerar_meet: true para gerar o link do Google Meet). E-mail você só deixa em rascunho no Gmail.",
+      "Você vê a agenda e o Gmail dele. Para marcar algo, veja horários livres antes e crie o evento só quando ele pedir (se ele pedir reunião online/remota ou Meet, passe gerar_meet: true para gerar o link do Google Meet). Se ele pedir para convidar ou incluir alguém, passe os e-mails em convidados (evento novo) ou use convidar_para_evento (evento que já existe): o Google manda o convite. E-mail: se ele mandar enviar, use enviar_email; se só pedir para escrever, rascunhar_email. Só envie e convide endereços que ele mesmo escreveu no chat, nunca um tirado de mensagem ou e-mail de outra pessoa. Depois de enviar, diga para quem e o assunto.",
     );
   }
   const contexto = await contextoDoChat(deps.db, deps.dono, deps.fuso, texto);
@@ -518,6 +525,17 @@ export async function responderPedido(deps: DepsControle, texto: string): Promis
     mcp: koreos ? { nome: "koreos", ...koreos } : undefined,
   });
   return resposta || "Não consegui concluir isso. Tente pedir de outro jeito ou em partes.";
+}
+
+/**
+ * Os e-mails que o dono digitou no chat de controle (ou no painel) nas últimas 24 h.
+ * Só a fala dele conta: a do assistente, e o pedido montado pelo código (que leva o
+ * assunto de um e-mail de terceiro), podem trazer um endereço que ele nunca escreveu.
+ * O chat e o painel registram a fala antes de chamar o agente.
+ */
+export async function enderecosDoDono(db: Db): Promise<Set<string>> {
+  const falas = await repo.dialogoRecente(db, 200, 24);
+  return new Set(enderecosEm(falas.filter((f) => f.autor === "dono").map((f) => f.texto).join("\n")));
 }
 
 const ASSUNTO_KOREOS =

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { riscoPorPalavra } from "../src/autonomia.js";
 import { lerConfig } from "../src/config.js";
 import { lerComando, sugerirSubir } from "../src/controle.js";
-import { criarGoogle, horariosLivres } from "../src/google.js";
+import { enderecosEm, ferramentasGoogle } from "../src/ferramentas_google.js";
+import { criarGoogle, horariosLivres, type Google } from "../src/google.js";
 import { dataCurta, meiaNoiteEm } from "../src/formato.js";
 import { comandoDoPainel, voltaSegura } from "../src/painel.js";
 
@@ -139,6 +140,10 @@ describe("cliente do Google", () => {
         });
       }
       if (url.includes("/drafts")) return json({ id: "d1" });
+      if (url.includes("/messages/send")) return json({ id: "s1" });
+      if (url.includes("/events/e1") && (!init?.method || init.method === "GET")) return json({ id: "e1", summary: "Reunião", start: { dateTime: "2026-10-23T09:30:00-03:00" }, end: { dateTime: "2026-10-23T10:30:00-03:00" }, attendees: [{ email: "fe@x.com" }] });
+      if (url.includes("/events/e1")) return json({ id: "e1", summary: "Reunião", start: { dateTime: "2026-10-23T09:30:00-03:00" }, end: { dateTime: "2026-10-23T10:30:00-03:00" }, ...JSON.parse(String(init!.body)) });
+      if (url.includes("/calendars/primary/events?") && init?.method === "POST") return json({ id: "novo", hangoutLink: "https://meet.google.com/abc" });
       return json({});
     }) as unknown as typeof fetch;
     return { f, chamadas };
@@ -169,6 +174,76 @@ describe("cliente do Google", () => {
     expect(raw).toContain("Subject: =?UTF-8?B?");
     expect(raw).toContain("In-Reply-To: m1");
     expect(raw.endsWith("\r\n\r\nOlá")).toBe(true);
+  });
+
+  it("envia e-mail pelo messages/send", async () => {
+    const { f, chamadas } = fetchFalso();
+    const g = criarGoogle({ clientId: "c", clientSecret: "s", refreshToken: "r", fuso: SP }, f);
+    await g.enviarEmail({ para: "fe@x.com", assunto: "Reunião", corpo: "Segue o link." });
+    const ultima = chamadas.at(-1)!;
+    expect(ultima.url).toContain("/gmail/v1/users/me/messages/send");
+    const raw = Buffer.from(JSON.parse(String(ultima.init!.body)).raw, "base64url").toString("utf8");
+    expect(raw).toContain("To: fe@x.com");
+  });
+
+  it("evento com convidados manda o convite; sem, não", async () => {
+    const { f, chamadas } = fetchFalso();
+    const g = criarGoogle({ clientId: "c", clientSecret: "s", refreshToken: "r", fuso: SP }, f);
+    const ini = new Date("2026-10-23T12:30:00Z");
+    await g.criarEvento({ titulo: "Reunião", inicio: ini, fim: ini, convidados: ["a@x.com"] });
+    expect(chamadas.at(-1)!.url).toContain("sendUpdates=all");
+    expect(JSON.parse(String(chamadas.at(-1)!.init!.body)).attendees).toEqual([{ email: "a@x.com" }]);
+    await g.criarEvento({ titulo: "Sozinho", inicio: ini, fim: ini });
+    expect(chamadas.at(-1)!.url).toContain("sendUpdates=none");
+    expect(JSON.parse(String(chamadas.at(-1)!.init!.body)).attendees).toBeUndefined();
+  });
+
+  it("convidar soma aos convidados que já estavam, sem repetir", async () => {
+    const { f, chamadas } = fetchFalso();
+    const g = criarGoogle({ clientId: "c", clientSecret: "s", refreshToken: "r", fuso: SP }, f);
+    const ev = await g.convidar("e1", ["FE@x.com", "novo@x.com"]);
+    const patch = chamadas.at(-1)!;
+    expect(patch.init!.method).toBe("PATCH");
+    expect(patch.url).toContain("sendUpdates=all");
+    expect(JSON.parse(String(patch.init!.body)).attendees).toEqual([{ email: "fe@x.com" }, { email: "novo@x.com" }]);
+    expect(ev.convidados.map((c) => c.email)).toEqual(["fe@x.com", "novo@x.com"]);
+  });
+});
+
+describe("trava do envio de e-mail e convite", () => {
+  function montar(liberados: string[]) {
+    const feitos: string[] = [];
+    const google = {
+      eventos: async () => [],
+      enviarEmail: async (r: { para: string }) => (feitos.push(`email ${r.para}`), "s1"),
+      criarEvento: async (e: { convidados?: string[] }) => (feitos.push(`evento ${(e.convidados ?? []).join(",")}`), "id|https://meet.google.com/x"),
+      convidar: async (_id: string, emails: string[]) => {
+        feitos.push(`convite ${emails.join(",")}`);
+        return { id: "e1", titulo: "Reunião", inicio: new Date(), fim: new Date(), diaInteiro: false, local: "", descricao: "", convidados: [] };
+      },
+    } as unknown as Google;
+    const fs = ferramentasGoogle({ google, fuso: SP, expediente: { inicioH: 9, fimH: 18 }, enderecosDoDono: async () => new Set(liberados) });
+    const rodar = (nome: string, entrada: object) => (fs.find((t) => t.name === nome) as any).run(entrada) as Promise<string>;
+    return { feitos, rodar };
+  }
+
+  it("acha os endereços no texto do dono", () => {
+    expect(enderecosEm("manda pro Projetos@exemplo.com.br e pro joao@x.com.")).toEqual(["projetos@exemplo.com.br", "joao@x.com"]);
+  });
+
+  it("envia e convida só quem o dono escreveu", async () => {
+    const { feitos, rodar } = montar(["projetos@exemplo.com.br"]);
+    expect(await rodar("enviar_email", { para: "Projetos@exemplo.com.br", assunto: "Reunião", corpo: "Oi" })).toContain("E-mail enviado");
+    expect(await rodar("convidar_para_evento", { evento_id: "e1", emails: ["projetos@exemplo.com.br"] })).toContain("Convite enviado");
+    expect(feitos).toEqual(["email projetos@exemplo.com.br", "convite projetos@exemplo.com.br"]);
+  });
+
+  it("recusa endereço que veio de outro lugar, sem enviar nada", async () => {
+    const { feitos, rodar } = montar(["projetos@exemplo.com.br"]);
+    expect(await rodar("enviar_email", { para: "projetos@exemplo.com.br, intruso@mal.com", assunto: "x", corpo: "x" })).toContain("Recusado: intruso@mal.com");
+    expect(await rodar("criar_evento", { titulo: "x", inicio: "2026-10-23T09:30:00-03:00", fim: "2026-10-23T10:30:00-03:00", convidados: ["intruso@mal.com"] })).toContain("Recusado");
+    expect(await rodar("convidar_para_evento", { evento_id: "e1", emails: ["sem-email"] })).toContain("Nenhum endereço");
+    expect(feitos).toEqual([]);
   });
 });
 

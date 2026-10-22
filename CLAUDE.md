@@ -7,7 +7,12 @@ Leia o README antes (fluxo, comandos, instalação).
   de envio. Sai pelo `ok` do dono, ou pela autonomia que ele deu ao contato (`src/autonomia.ts`):
   nível 2 com janela de veto, nível 3 direto, e nunca com risco alto, `[preencher:]`, em grupo,
   entre 21h e 8h ou com `pausa`. Não crie outro caminho de envio nem afrouxe essas travas sem
-  pedido explícito do Lucas. E-mail: só rascunho no Gmail. Evento: sem convidados.
+  pedido explícito do Lucas.
+- E-mail e convite de evento (pedido do Lucas, 22/10/2026): saem por ordem dele, e só para
+  endereço que ele mesmo digitou (`enderecosDoDono` em `src/controle.ts`, falas `dono` do
+  `dialogo` nas últimas 24 h; a trava é `destinatarios` em `src/ferramentas_google.ts`).
+  Nunca libere endereço do pedido montado pelo código, da fala do assistente ou de mensagem e
+  e-mail de terceiros: é por aí que um texto de fora mandaria o assistente escrever a alguém.
 - As travas do envio automático são conferidas no banco, no mesmo UPDATE que reserva o rascunho
   (`repo.reservarEnvio`): entre ler e enviar, o dono pode vetar, ajustar, pausar, baixar o nível,
   tirar a pessoa ou responder à mão. Não confira só em memória antes de enviar.

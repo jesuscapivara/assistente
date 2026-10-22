@@ -105,6 +105,12 @@ class GoogleFalso implements Google {
   async email(): Promise<any> {
     return {};
   }
+  async convidar(): Promise<any> {
+    return {};
+  }
+  async enviarEmail() {
+    return "s";
+  }
   async rascunhoEmail() {
     return "d";
   }

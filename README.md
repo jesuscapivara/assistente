@@ -20,8 +20,9 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
   na hora; `confirma N` coloca na agenda do Google.
 - Sabe o que **você está esperando** de cada um ("ele ficou de mandar as medidas") e, depois
   de alguns dias, pergunta se é para cobrar.
-- Com Google ligado: vê e cria eventos (sem convidados), sugere horários livres, lê e busca
-  e-mails e deixa **rascunho** de resposta no Gmail.
+- Com Google ligado: vê e cria eventos, sugere horários livres, lê e busca e-mails e deixa
+  **rascunho** de resposta no Gmail. Quando você manda ("pode mandar", "inclui ele no meet"),
+  envia o e-mail e convida para o evento, só para endereço que você escreveu no chat.
 - Com KoreOS ligado: consulta projetos, tarefas, clientes, financeiro e pranchas pelo MCP do
   KoreOS (pergunta antes de alterar algo lá).
 
@@ -217,4 +218,7 @@ Para ver o cartão sem banco nem Claude: `npx tsx scripts/cartao-exemplo.ts cart
 - Texto bruto apagado depois de `RETENCAO_DIAS` (365); a ficha e a memória de cada pessoa ficam.
 - `fora <nome>` apaga na hora tudo daquela conversa: mensagens, ficha, compromissos, datas e rascunhos.
 - Webhook, painel e engine sem porta pública; os tokens não aparecem no log.
-- E-mail nunca é enviado (só rascunho no Gmail); evento nunca leva convidado.
+- E-mail só é enviado, e convite só é mandado, por ordem sua e para endereço que **você**
+  digitou no chat ou no painel nas últimas 24 h. Endereço tirado de mensagem ou e-mail de
+  outra pessoa é recusado (um texto de terceiro não consegue mandar o assistente escrever
+  para alguém). Sem ordem de enviar, fica em rascunho.

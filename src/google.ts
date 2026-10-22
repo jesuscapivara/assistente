@@ -3,8 +3,9 @@
  * vez com `scripts/google.mjs`). Sem SDK: são seis chamadas, e o resto do código só
  * conhece a interface `Google`.
  *
- * Escopos: agenda (ler e criar eventos), livre/ocupado, Gmail leitura e rascunho.
- * Não há escopo de envio de e-mail: rascunho de e-mail fica no Gmail para o dono enviar.
+ * Escopos: agenda (ler, criar eventos e convidar), livre/ocupado, Gmail leitura e
+ * `gmail.compose` (rascunho e envio). Quem decide se um e-mail sai ou um convite é
+ * mandado não é esta camada: é a trava das ferramentas (`ferramentas_google.ts`).
  */
 import { meiaNoiteEm } from "./formato.js";
 
@@ -37,10 +38,22 @@ export interface Email {
 export interface Google {
   eventos(de: Date, ate: Date): Promise<Evento[]>;
   ocupado(de: Date, ate: Date): Promise<{ inicio: Date; fim: Date }[]>;
-  criarEvento(e: { titulo: string; inicio: Date; fim: Date; descricao?: string; local?: string; meet?: boolean }): Promise<string>;
+  criarEvento(e: { titulo: string; inicio: Date; fim: Date; descricao?: string; local?: string; meet?: boolean; convidados?: string[] }): Promise<string>;
+  /** Acrescenta convidados a um evento que já existe, e o Google manda o convite a eles. */
+  convidar(eventoId: string, emails: string[]): Promise<Evento>;
   emails(busca: string, max?: number): Promise<Email[]>;
   email(id: string): Promise<Email>;
-  rascunhoEmail(r: { para: string; assunto: string; corpo: string; threadId?: string; emResposta?: string }): Promise<string>;
+  rascunhoEmail(r: NovoEmail): Promise<string>;
+  /** Envia de fato, pela conta do dono. */
+  enviarEmail(r: NovoEmail): Promise<string>;
+}
+
+export interface NovoEmail {
+  para: string;
+  assunto: string;
+  corpo: string;
+  threadId?: string;
+  emResposta?: string;
 }
 
 export const ESCOPOS_GOOGLE = [
@@ -110,8 +123,9 @@ export function criarGoogle(
     },
 
     async criarEvento(e) {
-      // Sem convidados, de propósito: convite manda e-mail em nome do dono.
-      const url = `${CAL}/calendars/primary/events?sendUpdates=none${e.meet ? "&conferenceDataVersion=1" : ""}`;
+      // Com convidados, o Google manda o convite por e-mail em nome do dono; sem, ninguém fica sabendo.
+      const convidados = e.convidados ?? [];
+      const url = `${CAL}/calendars/primary/events?sendUpdates=${convidados.length ? "all" : "none"}${e.meet ? "&conferenceDataVersion=1" : ""}`;
       const corpo: any = {
         summary: e.titulo,
         description: e.descricao ?? "",
@@ -119,6 +133,7 @@ export function criarGoogle(
         start: { dateTime: e.inicio.toISOString(), timeZone: cred.fuso },
         end: { dateTime: e.fim.toISOString(), timeZone: cred.fuso },
       };
+      if (convidados.length) corpo.attendees = convidados.map((email) => ({ email }));
       if (e.meet) {
         corpo.conferenceData = {
           createRequest: {
@@ -132,6 +147,17 @@ export function criarGoogle(
         body: JSON.stringify(corpo),
       });
       return j.hangoutLink ? `${j.id}|${j.hangoutLink}` : j.id;
+    },
+
+    async convidar(eventoId, emails) {
+      const atual = await chamar<any>(`${CAL}/calendars/primary/events/${encodeURIComponent(eventoId)}`);
+      const ja = new Set((atual.attendees ?? []).map((a: any) => String(a.email).toLowerCase()));
+      const attendees = [...(atual.attendees ?? []), ...emails.filter((e) => !ja.has(e.toLowerCase())).map((email) => ({ email }))];
+      const j = await chamar<any>(`${CAL}/calendars/primary/events/${encodeURIComponent(eventoId)}?sendUpdates=all`, {
+        method: "PATCH",
+        body: JSON.stringify({ attendees }),
+      });
+      return lerEvento(j, cred.fuso);
     },
 
     async emails(busca, max = 15) {
@@ -150,22 +176,34 @@ export function criarGoogle(
     },
 
     async rascunhoEmail(r) {
-      const cabecalhos = [
-        `To: ${r.para}`,
-        `Subject: ${codificarAssunto(r.assunto)}`,
-        "MIME-Version: 1.0",
-        "Content-Type: text/plain; charset=UTF-8",
-        "Content-Transfer-Encoding: 8bit",
-        ...(r.emResposta ? [`In-Reply-To: ${r.emResposta}`, `References: ${r.emResposta}`] : []),
-      ];
-      const raw = Buffer.from(`${cabecalhos.join("\r\n")}\r\n\r\n${r.corpo}`, "utf8").toString("base64url");
       const j = await chamar<{ id: string }>(`${GMAIL}/drafts`, {
         method: "POST",
-        body: JSON.stringify({ message: { raw, ...(r.threadId ? { threadId: r.threadId } : {}) } }),
+        body: JSON.stringify({ message: { raw: mensagemCrua(r), ...(r.threadId ? { threadId: r.threadId } : {}) } }),
+      });
+      return j.id;
+    },
+
+    async enviarEmail(r) {
+      const j = await chamar<{ id: string }>(`${GMAIL}/messages/send`, {
+        method: "POST",
+        body: JSON.stringify({ raw: mensagemCrua(r), ...(r.threadId ? { threadId: r.threadId } : {}) }),
       });
       return j.id;
     },
   };
+}
+
+/** O e-mail no formato RFC 2822, em base64url, como o Gmail pede no rascunho e no envio. */
+function mensagemCrua(r: NovoEmail): string {
+  const cabecalhos = [
+    `To: ${r.para}`,
+    `Subject: ${codificarAssunto(r.assunto)}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 8bit",
+    ...(r.emResposta ? [`In-Reply-To: ${r.emResposta}`, `References: ${r.emResposta}`] : []),
+  ];
+  return Buffer.from(`${cabecalhos.join("\r\n")}\r\n\r\n${r.corpo}`, "utf8").toString("base64url");
 }
 
 function lerEvento(e: any, fuso: string): Evento {
