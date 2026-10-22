@@ -118,6 +118,7 @@ export async function planoDoCartao(ia: Ia | null, dia: Dia, dono: string, fuso:
 - atos: três blocos de horário cobrindo o dia, cada um com uma frase específica da agenda. Dia calmo: frase curta, sem enchimento.
 - precisa: o que custa ignorar até amanhã (alguém travado esperando ele, prazo hoje, preparação para algo de amanhã). Título nas palavras dele; a frase diz de onde vem (WhatsApp, e-mail, agenda, KoreOS, quem, quando) e o que querem.
 - Tarefas atrasadas do KoreOS: junte num item só ("5 tarefas atrasadas no KoreOS", citando as de prioridade alta), a não ser que uma delas seja de fato o assunto do dia.
+- Contas vencidas do KoreOS: também num item só ("8 contas vencidas no KoreOS", com as duas maiores). Conta que vence hoje pode ter item próprio.
 - resolvido: só o que veio marcado como resolvido.
 - Use só os itens abaixo, citando o ref exato. Não invente nada.
 ${VOZ}`,
