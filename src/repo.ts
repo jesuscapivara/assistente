@@ -288,10 +288,15 @@ export async function criarCompromisso(
   db: Db,
   c: { chatJid: string; descricao: string; quando: Date | null; responsavel: string; mensagemId?: string | null },
 ): Promise<number | null> {
-  // O mesmo combinado aparece em mais de uma rodada de extração: não duplica.
+  // O mesmo combinado aparece em mais de uma rodada de extração, e o modelo não repete
+  // as palavras ("ligar para o András" e "ligar para o Arq. András Juhász", 22/10/2026).
+  // Mesma conversa, mesmo responsável e horário a menos de 1 hora é o mesmo compromisso.
   const dup = await db.query(
-    `SELECT 1 FROM compromissos WHERE chat_jid = $1 AND lower(descricao) = lower($2) AND status IN ('sugerido','confirmado')`,
-    [c.chatJid, c.descricao],
+    `SELECT 1 FROM compromissos WHERE chat_jid = $1 AND status IN ('sugerido','confirmado')
+       AND (lower(descricao) = lower($2)
+            OR ($3::timestamptz IS NOT NULL AND quando IS NOT NULL AND responsavel = $4
+                AND abs(extract(epoch FROM quando - $3::timestamptz)) < 3600))`,
+    [c.chatJid, c.descricao, c.quando, c.responsavel],
   );
   if (dup.rowCount) return null;
   const r = await db.query<{ id: number }>(

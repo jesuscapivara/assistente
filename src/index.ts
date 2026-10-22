@@ -14,7 +14,7 @@ import { criarGoogle } from "./google.js";
 import { criarIa } from "./ia.js";
 import { ingerir } from "./ingestao.js";
 import { comandoDoPainel, paginaDoPainel } from "./painel.js";
-import { briefings, cobrancas, fimDoDia, revisaoSemanal } from "./proativo.js";
+import { briefings, cobrancas, fimDoDia, lembretesNaHora, revisaoSemanal } from "./proativo.js";
 import * as repo from "./repo.js";
 import { assuntoDe, coletarDia, diasEsperando, ficouParaTras, resumoEmTexto } from "./resumo.js";
 import { criarServidor } from "./server.js";
@@ -235,7 +235,7 @@ const pararAgenda = iniciarAgenda({
         },
       }),
   },
-  porMinuto: [() => enviarAgendados(depsAutonomia), () => briefings(base, cfg.BRIEFING_MIN)],
+  porMinuto: [() => enviarAgendados(depsAutonomia), () => briefings(base, cfg.BRIEFING_MIN), () => lembretesNaHora(base, cfg.LEMBRETE_MIN)],
   diarias,
 });
 

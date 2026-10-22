@@ -98,12 +98,25 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
 
   const nome = repo.nomeDe(contato);
   const agora = deps.agora?.() ?? new Date();
+  // O que já está anotado nesta conversa vai junto: o trecho "ok, combinado" relê a
+  // promessa anterior e o modelo a anotaria de novo com outras palavras.
+  const jaAnotados = (await repo.compromissosAbertos(db)).filter((k) => k.chat_jid === jid);
+  const memoria = [
+    repo.fichaEmTexto(contato),
+    jaAnotados.length
+      ? `Compromissos JÁ ANOTADOS nesta conversa (não repita, nem com outras palavras):\n${jaAnotados
+          .map((k) => `- ${k.descricao}${k.quando ? ` (${dataCurta(new Date(k.quando), deps.fuso)})` : ""}`)
+          .join("\n")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const r = await deps.ia.extrair({
     agora: agoraPorExtenso(agora, deps.fuso),
     dono: deps.dono,
     contato: nome,
     grupo: contato.grupo,
-    memoria: repo.fichaEmTexto(contato),
+    memoria,
     licoes: await repo.licoesDeLeitura(db),
     anteriores: linhas(anteriores, deps.dono, nome, deps.fuso),
     novas: linhas(novas, deps.dono, nome, deps.fuso),

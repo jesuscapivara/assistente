@@ -49,6 +49,8 @@ const Esquema = z.object({
     .default("1")
     .transform((v) => v === "1"),
   BRIEFING_MIN: z.coerce.number().int().min(5).default(45),
+  // Compromisso com hora avisa este tanto antes ("às 13:30 te ligo" → 13:20).
+  LEMBRETE_MIN: z.coerce.number().int().min(1).default(10),
 
   // KoreOS (opcional): o agente usa o MCP do KoreOS com o token pessoal do dono.
   KOREOS_MCP_URL: z.string().url().optional(),

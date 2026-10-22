@@ -174,3 +174,28 @@ export async function revisaoSemanal(deps: DepsProativo, agora = new Date()): Pr
     .catch(() => "");
   await deps.avisar(`🗓️ *Revisão da semana*\n\n${texto || dados}`);
 }
+
+/**
+ * Compromisso do dono com hora ("às 13:30 te ligo") avisa `antecedenciaMin` antes, uma
+ * vez. Só banco, sem modelo: o compromisso já foi lido quando a mensagem chegou.
+ * Sem isto, a promessa só aparecia no resumo da manhã e na lista das 18h.
+ */
+export async function lembretesNaHora(deps: Pick<DepsProativo, "db" | "fuso" | "avisar">, antecedenciaMin: number, agora = new Date()): Promise<number> {
+  const r = await deps.db.query<{ id: number; descricao: string; quando: Date; contato: string }>(
+    `SELECT k.id, k.descricao, k.quando, ${repo.NOME_SQL} AS contato
+     FROM compromissos k JOIN contatos c ON c.jid = k.chat_jid
+     WHERE k.status IN ('sugerido', 'confirmado') AND k.responsavel <> 'contato' AND NOT c.excluido
+       AND k.quando > $1 AND k.quando <= $1 + make_interval(mins => $2)
+     ORDER BY k.quando`,
+    [agora, antecedenciaMin],
+  );
+  let feitos = 0;
+  for (const k of r.rows) {
+    // A chave leva o horário: adiado para outro dia, avisa de novo no dia novo.
+    if (!(await repo.alertaNovo(deps.db, `lembrete:${k.id}:${new Date(k.quando).toISOString()}`))) continue;
+    const { hora } = relogio(new Date(k.quando), deps.fuso);
+    await deps.avisar(`⏰ ${hora} — ${k.descricao} (${k.contato}) · #${k.id}\n_feito ${k.id} · ignora ${k.id}_`);
+    feitos++;
+  }
+  return feitos;
+}

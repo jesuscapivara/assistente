@@ -11,7 +11,7 @@ import type { Evento, Google } from "../src/google.js";
 import type { EntradaExtracao, Extracao, Ia } from "../src/ia.js";
 import { ingerir } from "../src/ingestao.js";
 import { paginaDoPainel } from "../src/painel.js";
-import { briefings, cobrancas, fimDoDia, radar, revisaoSemanal } from "../src/proativo.js";
+import { briefings, cobrancas, fimDoDia, lembretesNaHora, radar, revisaoSemanal } from "../src/proativo.js";
 import * as repo from "../src/repo.js";
 import { montarResumo } from "../src/resumo.js";
 import { criarServidor } from "../src/server.js";
@@ -403,6 +403,21 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     expect(avisos.at(-1)).toMatch(/📅 Em 30 min: \*Reunião com Fernanda\* \(Escritório\)/);
     expect(ia.escritos.at(-1)!.conteudo).toMatch(/Cliente do Bela Vista[\s\S]*fecha a marcenaria/);
     expect(await briefings(deps, 45)).toBe(0);
+  });
+
+  it("lembrete na hora: 10 min antes, uma vez, só do dono; e a mesma promessa não duplica", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    const agora = new Date("2026-10-22T16:22:00Z");
+    const as1330 = new Date("2026-10-22T16:30:00Z");
+    const id = (await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "ligar para a Fernanda", quando: as1330, responsavel: "eu" }))!;
+    // Outras palavras, mesmo horário: é o mesmo compromisso.
+    expect(await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "ligar para a Fernanda sobre a perícia", quando: new Date(as1330.getTime() + 5 * 60_000), responsavel: "eu" })).toBeNull();
+    await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "Fernanda mandar a planta", quando: as1330, responsavel: "contato" });
+
+    expect(await lembretesNaHora(deps, 10, new Date("2026-10-22T16:10:00Z"))).toBe(0);
+    expect(await lembretesNaHora(deps, 10, agora)).toBe(1);
+    expect(avisos.at(-1)).toBe(`⏰ 13:30 — ligar para a Fernanda (Fernanda) · #${id}\n_feito ${id} · ignora ${id}_`);
+    expect(await lembretesNaHora(deps, 10, new Date("2026-10-22T16:25:00Z"))).toBe(0);
   });
 
   it("fim do dia, datas, radar e revisão da semana", async () => {
