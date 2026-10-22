@@ -4,6 +4,7 @@ import { dataCurta, relogio } from "./formato.js";
 import type { Email, Evento, Google } from "./google.js";
 import type { Ia } from "./ia.js";
 import { diaMes, koreosDoDia, type KoreosDireto, type KoreosDoDia } from "./koreos.js";
+import { emailsOcultos, emailVisivel, pautaDoTexto, type Item } from "./pauta.js";
 import * as repo from "./repo.js";
 
 export interface DepsResumo {
@@ -52,6 +53,8 @@ export async function coletarDia(deps: DepsResumo, agora = new Date()): Promise<
     eventosAmanha = evs.filter((e) => e.inicio >= amanha0);
     // Só a caixa principal: promoção e rede social não pedem nada de ninguém.
     emails = await deps.google.emails("in:inbox is:unread category:primary newer_than:2d", 8).catch(() => [] as Email[]);
+    const ocultos = await emailsOcultos(deps.db);
+    emails = emails.filter((e) => emailVisivel(ocultos, e.id, agora));
   }
   const { dia } = relogio(agora, deps.fuso);
   const [ano, mes, d] = dia.split("-").map(Number);
@@ -122,7 +125,10 @@ export function esperandoRecente(dia: Pick<Dia, "esperando" | "agora">): Dia["es
  * errar (foi ele que trocou nomes por "#81690412224708"). `refs` liga cada nome ao
  * jid, para o "responde o segundo" depois.
  */
-export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: string; refs: string } {
+export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: string; refs: string; pauta: Item[] } {
+  // As letras de quem espera (resolvi A, adia B sábado), na ordem em que aparecem abaixo.
+  const pauta = pautaDoTexto(dia);
+  let letra = 0;
   const blocos: string[] = [];
   const agora = dia.agora;
   if (dia.eventosHoje.length) blocos.push(`*Na agenda hoje*\n${dia.eventosHoje.map((e) => eventoEmTexto(e, fuso)).join("\n")}`);
@@ -152,10 +158,10 @@ export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: st
   }
   const paraTras = ficouParaTras(dia);
   if (paraTras.length) {
-    blocos.push("*Ficou para trás*\n" + paraTras.map((e) => `• *${e.nome}* (há ${diasEsperando(e, agora)} dias): ${assuntoDe(e)}`).join("\n"));
+    blocos.push("*Ficou para trás*\n" + paraTras.map((e) => `${pauta[letra++].letra} • *${e.nome}* (há ${diasEsperando(e, agora)} dias): ${assuntoDe(e)}`).join("\n"));
   }
   const recentes = esperandoRecente(dia);
-  if (recentes.length) blocos.push("*Esperando resposta sua*\n" + recentes.map((e) => linhaDeEspera(e, fuso)).join("\n"));
+  if (recentes.length) blocos.push("*Esperando resposta sua*\n" + recentes.map((e) => `${pauta[letra++].letra} ${linhaDeEspera(e, fuso)}`).join("\n"));
   const k = dia.koreos;
   if (k && (k.tarefasHoje.length || k.tarefasAtrasadas.length || k.contasHoje.length || k.contasAtrasadas.length)) {
     blocos.push(
@@ -173,12 +179,12 @@ export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: st
   }
 
   const saudacao = `Bom dia, ${dono}! (${diaPorExtenso(agora, fuso)})`;
-  const texto = blocos.length ? `${saudacao}\n\n${blocos.join("\n\n")}\n\n_confirma N · feito N · ignora N_` : `${saudacao} Nada pendente por aqui hoje.`;
+  const texto = blocos.length ? `${saudacao}\n\n${blocos.join("\n\n")}\n\n_compromisso: confirma N · feito N · ignora N_${pauta.length ? "\n_pessoa: resolvi A · adia A sábado · ignora A · responde A_" : ""}` : `${saudacao} Nada pendente por aqui hoje.`;
   const refs = dia.esperando.map((e) => `${e.nome} = ${e.jid}`).join("\n");
-  return { texto, refs };
+  return { texto, refs, pauta };
 }
 
-export async function montarResumo(deps: DepsResumo, agora = new Date()): Promise<{ texto: string; refs: string }> {
+export async function montarResumo(deps: DepsResumo, agora = new Date()): Promise<{ texto: string; refs: string; pauta: Item[] }> {
   return resumoEmTexto(await coletarDia(deps, agora), deps.dono, deps.fuso);
 }
 

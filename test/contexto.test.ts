@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { desenharCartao, planoDoCartao, relevo } from "../src/cartao.js";
 import { custoDe } from "../src/consumo.js";
-import { lerComando, precisaDoKoreos } from "../src/controle.js";
+import { itemDoComando, lerComando, precisaDoKoreos } from "../src/controle.js";
+import { diaDe, pautaDoCartao } from "../src/pauta.js";
 import { grupoEnvolveDono, semConteudo } from "../src/extracao.js";
 import { guardarImagem, lerImagem } from "../src/midia.js";
 import { nomeDe } from "../src/repo.js";
@@ -220,8 +221,9 @@ describe("ficou para trás", () => {
       { jid: "c@s.whatsapp.net", nome: "Carla", ultima: "?", quando: dias(4), situacao: "" },
     ];
     const { texto } = resumoEmTexto(dia, "Lucas", SP);
-    expect(texto).toMatch(/\*Ficou para trás\*\n• \*Bruno Lima\* \(há 9 dias\): Você ficou de ligar para o Bruno\.\n• \*Carla\* \(há 4 dias\)/);
-    expect(texto).toMatch(/\*Esperando resposta sua\*\n• \*Ana\*/);
+    expect(texto).toContain("*Ficou para trás*\nA • *Bruno Lima* (há 9 dias): Você ficou de ligar para o Bruno.\nB • *Carla* (há 4 dias)");
+    expect(texto).toContain("*Esperando resposta sua*\nC • *Ana*");
+    expect(texto).toMatch(/_pessoa: resolvi A · adia A sábado · ignora A · responde A_/);
     expect(texto.match(/Bruno Lima/g)).toHaveLength(1);
 
     // No cartão, o modelo nem recebe quem ficou para trás: a seção é montada dos dados.
@@ -230,5 +232,55 @@ describe("ficou para trás", () => {
     await planoDoCartao(ia, dia, "Lucas", SP);
     expect(itens).toMatch(/Ana/);
     expect(itens).not.toMatch(/Bruno|Carla/);
+  });
+});
+
+describe("agir pela letra do resumo", () => {
+  it("resolvi, adia, ignora, responde e cobra com letra; 'a', 'e' e 'o' minúsculos são palavras", () => {
+    expect(itemDoComando("resolvi B")).toMatchObject({ acao: "resolvi", letra: "B", resto: "" });
+    expect(itemDoComando("já foi c")).toMatchObject({ acao: "resolvi", letra: "C" });
+    expect(itemDoComando("adia o D sábado")).toMatchObject({ acao: "adia", letra: "D", resto: "sábado" });
+    expect(itemDoComando("responde A: diz que amanhã eu ligo")).toMatchObject({ acao: "responde", letra: "A", resto: "diz que amanhã eu ligo" });
+    expect(itemDoComando("cobra f")).toMatchObject({ acao: "cobra", letra: "F" });
+    // Frases normais continuam indo para o agente.
+    expect(itemDoComando("responde a Ana dizendo que sim")).toBeNull();
+    expect(itemDoComando("adia o almoço")).toBeNull();
+    expect(itemDoComando("cobra João")).toBeNull();
+    expect(itemDoComando("feito 5")).toBeNull();
+    expect(lerComando("feito 5")).toEqual({ tipo: "compromisso", acao: "feito", id: 5 });
+  });
+
+  it("entende quando adiar, no fuso do dono", () => {
+    const quinta = new Date("2026-10-22T12:00:00Z");
+    expect(diaDe("amanhã", quinta, SP)).toBe("2026-10-23");
+    expect(diaDe("depois de amanhã", quinta, SP)).toBe("2026-10-24");
+    expect(diaDe("sábado", quinta, SP)).toBe("2026-10-24");
+    expect(diaDe("quinta", quinta, SP)).toBe("2026-10-29");
+    expect(diaDe("segunda-feira", quinta, SP)).toBe("2026-10-26");
+    expect(diaDe("3 dias", quinta, SP)).toBe("2026-10-25");
+    expect(diaDe("semana que vem", quinta, SP)).toBe("2026-10-29");
+    expect(diaDe("25/10", quinta, SP)).toBe("2026-10-25");
+    expect(diaDe("10/10", quinta, SP)).toBe("2027-10-10");
+    expect(diaDe("um dia desses", quinta, SP)).toBeNull();
+    // 23h de quinta em São Paulo já é sexta em UTC: o "amanhã" é sexta, do fuso do dono.
+    expect(diaDe("amanhã", new Date("2026-10-23T02:00:00Z"), SP)).toBe("2026-10-23");
+  });
+
+  it("no cartão, só ganha letra o que dá para resolver daqui, sem buraco entre as letras", () => {
+    const dia = diaVazio();
+    dia.esperando = [
+      { jid: "a@s.whatsapp.net", nome: "Ana", ultima: "?", quando: new Date(dia.agora.getTime() - 3600_000), situacao: "" },
+      { jid: "b@s.whatsapp.net", nome: "Bruno", ultima: "?", quando: new Date(dia.agora.getTime() - 5 * 86400_000), situacao: "" },
+    ];
+    dia.comData = [{ id: 7, chat_jid: "c@s.whatsapp.net", descricao: "x", quando: em(18), responsavel: "eu", status: "sugerido", contato_nome: "C" }];
+    const p = pautaDoCartao(dia, [
+      { ref: "T1", titulo: "Tarefa do KoreOS" },
+      { ref: "W1", titulo: "Ana espera" },
+      { ref: "#7", titulo: "Compromisso" },
+    ]);
+    expect(p.precisa.map((x) => x.letra)).toEqual(["", "A", "B"]);
+    expect(p.precisa[1]).toMatchObject({ tipo: "espera", jid: "a@s.whatsapp.net" });
+    expect(p.precisa[2]).toMatchObject({ tipo: "compromisso", compromissoId: 7, jid: "c@s.whatsapp.net" });
+    expect(p.ficou).toEqual([{ letra: "C", tipo: "espera", titulo: "Bruno", jid: "b@s.whatsapp.net" }]);
   });
 });

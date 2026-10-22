@@ -85,6 +85,7 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `perfil` · `regra nunca marco nada antes das 9` · `esquece 4` | o que ele sabe de você |
 | `estuda` | atualiza agora as fichas e o seu retrato |
 | `fora Grupo da Família` · `volta Grupo da Família` | tira (e apaga) ou devolve uma conversa |
+| `resolvi B` · `adia B sábado` · `ignora B` · `responde B <o quê>` · `cobra B` | pelas letras do último resumo (cartão ou texto). `resolvi` é para o que você resolveu por fora (ligação, pessoalmente), que o WhatsApp não vê; `adia` aceita amanhã, sábado, 3 dias, 25/10, e a pessoa volta antes se escrever; `ignora` tira e ensina que aquilo não pedia resposta. Frase livre também vale: "já liguei pro Bruno" |
 | `errado 1 quem vai ler é ele` | corrige o compromisso 1 e aprende para as próximas leituras; para o resto, diga com suas palavras ("a Thaís é notificação do KoreOS") |
 | `custo` | gasto com o Claude hoje, em 7 e em 30 dias, e por função |
 | `caderno` · `esquece caderno` | o que ele está acompanhando entre vocês; zera |

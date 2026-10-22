@@ -11,6 +11,7 @@ import { extrairChat } from "../src/extracao.js";
 import type { EntradaExtracao, Extracao, Ia } from "../src/ia.js";
 import { ingerir, ingerirHistorico } from "../src/ingestao.js";
 import * as repo from "../src/repo.js";
+import { gravarPauta } from "../src/pauta.js";
 import { montarResumo } from "../src/resumo.js";
 import type { Evolution } from "../src/whatsapp/evolution.js";
 
@@ -242,6 +243,41 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     await ing(msg(FERNANDA, "Pode ser sábado?", { quando: new Date(Date.now() - 300_000).toISOString() }));
     await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
     expect(ia.extracoes.at(-1)?.licoes).toMatch(/Quem escreve 'vou ler' é quem lê/);
+  });
+
+  it("pelas letras do resumo: resolvi, adia (e volta se escrever), ignora e responde", async () => {
+    await ing(msg(FERNANDA, "Me liga quando puder?", { quando: new Date(Date.now() - 5 * 86400_000).toISOString() }));
+    await repo.atualizarConversa(db, FERNANDA, { situacao: "Ela pediu que você ligue.", esperaResposta: true });
+    const id = (await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "mandar a planta", quando: new Date(Date.now() + 3600_000), responsavel: "eu" }))!;
+    const { pauta } = await montarResumo(deps);
+    await gravarPauta(db, [...pauta, { letra: "B", tipo: "compromisso", titulo: "mandar a planta", compromissoId: id, jid: FERNANDA }]);
+    expect(pauta[0]).toMatchObject({ letra: "A", jid: FERNANDA });
+    const esperando = async () => (await repo.esperandoResposta(db, 0)).map((e) => e.jid);
+
+    await tratarComando(deps, "adia A sábado");
+    expect(avisos.at(-1)).toMatch(/Fernanda volta no resumo de \d\d\/\d\d/);
+    expect(await esperando()).toEqual([]);
+    // Escreveu de novo antes do sábado: volta na hora.
+    await ing(msg(FERNANDA, "Oi, conseguiu ver?", { quando: new Date(Date.now() - 60_000).toISOString() }));
+    expect(await esperando()).toEqual([FERNANDA]);
+
+    await tratarComando(deps, "resolvi A");
+    expect(await esperando()).toEqual([]);
+    await tratarComando(deps, "feito B");
+    expect((await repo.compromissosAbertos(db)).find((k) => k.id === id)).toBeUndefined();
+
+    await repo.atualizarConversa(db, FERNANDA, { situacao: "Ela mandou um meme.", esperaResposta: true });
+    ia.estruturados.push({ compromisso: null, conversa: { situacao: "Ela mandou um meme.", espera_resposta: false, sistema: false }, licao: "Meme não pede resposta." });
+    await tratarComando(deps, "ignora A");
+    expect(await esperando()).toEqual([]);
+    expect(avisos.at(-1)).toMatch(/saiu da lista[\s\S]*Aprendi \(#\d+\): Meme não pede resposta/);
+
+    await tratarComando(deps, "responde A diz que ligo amanhã cedo");
+    expect(ia.textos.at(-1)).toMatch(/PEDIDO de Lucas: diz que ligo amanhã cedo/);
+    expect(avisos.at(-1)).toMatch(/Rascunho #\d+ para \*Fernanda\*/);
+
+    await tratarComando(deps, "resolvi Z");
+    expect(avisos.at(-1)).toMatch(/Não há item Z no último resumo \(A, B\)/);
   });
 
   it("o pedido livre leva o diálogo recente e o caderno", async () => {

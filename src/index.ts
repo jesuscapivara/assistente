@@ -9,6 +9,7 @@ import { abrirDb, migrar } from "./db.js";
 import { lerSituacoesPendentes, rodadaDeExtracao } from "./extracao.js";
 import { criarKoreosDireto } from "./koreos.js";
 import { guardarImagem } from "./midia.js";
+import { gravarPauta, pautaDoCartao } from "./pauta.js";
 import { criarGoogle } from "./google.js";
 import { criarIa } from "./ia.js";
 import { ingerir } from "./ingestao.js";
@@ -66,30 +67,44 @@ const base = { db, ia, dono: cfg.DONO_NOME, fuso: cfg.FUSO, avisar, google, kore
  */
 async function enviarResumo(): Promise<void> {
   const dia = await coletarDia(base);
-  const { texto, refs } = resumoEmTexto(dia, cfg.DONO_NOME, cfg.FUSO);
+  const { texto, refs, pauta: pautaTexto } = resumoEmTexto(dia, cfg.DONO_NOME, cfg.FUSO);
   if (cfg.RESUMO_IMAGEM) {
     try {
       const plano = await planoDoCartao(ia, dia, cfg.DONO_NOME, cfg.FUSO);
-      const png = await desenharCartao(dia, plano, cfg.FUSO);
+      const pauta = pautaDoCartao(dia, plano.precisa);
+      const png = await desenharCartao(dia, plano, cfg.FUSO, pauta);
       const url = `${urlInterna(cfg)}/midia/${guardarImagem(png)}.png`;
       const compromissos = [...dia.comData, ...dia.semData].map((c) => `#${c.id} ${c.descricao}`).slice(0, 8);
-      const legenda = `🤖 ${plano.manchete}${compromissos.length ? `\n\n${compromissos.join("\n")}\n_confirma N · feito N · ignora N_` : ""}`;
+      const comLetra = [...pauta.precisa, ...pauta.ficou].filter((x) => x.letra);
+      const legenda = [
+        `🤖 ${plano.manchete}`,
+        compromissos.length ? `${compromissos.join("\n")}\n_confirma N · feito N · ignora N_` : "",
+        comLetra.length ? `_resolvi ${comLetra[0].letra} · adia ${comLetra[0].letra} sábado · ignora ${comLetra[0].letra} · responde ${comLetra[0].letra}_` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       const id = await evolution.enviarImagem(donoJid, url, legenda.slice(0, 1000));
       await repo.registrarEnviada(db, id);
+      await gravarPauta(db, comLetra);
       // O que estava na imagem vai por extenso no diálogo: o agente não vê a figura.
+      const letraDe = (x: { letra: string } | undefined) => (x?.letra ? `${x.letra}. ` : "");
       const cartao = [
         `[cartão do resumo] ${plano.manchete}`,
         ...plano.atos.map((a) => `${a.faixa}: ${a.frase}`),
-        ...plano.precisa.map((p, i) => `Precisa de você ${i + 1}. ${p.titulo} — ${p.frase}`),
-        ...ficouParaTras(dia).slice(0, 5).map((e, i) => `Ficou para trás ${i + 1}. ${e.nome} (há ${diasEsperando(e, dia.agora)} dias) — ${assuntoDe(e)}`),
-        ...plano.resolvido.map((p, i) => `Resolvido ${i + 1}. ${p.frase}`),
+        ...plano.precisa.map((p, i) => `Precisa de você: ${letraDe(pauta.precisa[i])}${p.titulo} — ${p.frase}`),
+        ...ficouParaTras(dia)
+          .slice(0, 5)
+          .map((e, i) => `Ficou para trás: ${letraDe(pauta.ficou[i])}${e.nome} (há ${diasEsperando(e, dia.agora)} dias) — ${assuntoDe(e)}`),
+        ...plano.resolvido.map((p) => `Resolvido: ${p.frase}`),
+        ...compromissos,
       ].join("\n");
-      await repo.registrarFala(db, "assistente", `${cartao}\n\n${texto}`, refs).catch(() => undefined);
+      await repo.registrarFala(db, "assistente", cartao, refs).catch(() => undefined);
       return;
     } catch (err) {
       app.log.warn({ err: String(err) }, "cartão do resumo falhou; vai em texto");
     }
   }
+  await gravarPauta(db, pautaTexto);
   await avisar(texto, refs);
 }
 

@@ -65,6 +65,8 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
   if (!nova) return "repetido";
   // Respondeu pelo celular: sai da lista de pendências na hora, sem esperar a leitura.
   if (m.deMim) await repo.donoRespondeu(deps.db, chatJid);
+  // Escreveu de novo: o adiamento ("adia B sábado") perde o sentido, volta para a lista.
+  else await deps.db.query("UPDATE contatos SET adiado_ate = NULL WHERE jid = $1 AND adiado_ate IS NOT NULL", [chatJid]);
 
   if (m.tipo === "audio" && deps.aoAudio) {
     void deps.aoAudio(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "transcrição falhou"));

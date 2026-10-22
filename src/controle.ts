@@ -9,6 +9,7 @@ import type { Ia } from "./ia.js";
 import { escreverRascunho, previa, proporResposta } from "./rascunho.js";
 import { relatorioDeCusto } from "./consumo.js";
 import { corrigirLeitura } from "./corrigir.js";
+import { cuidarDoItem, gravarPauta, itemDaPauta, lerPauta, type DepsPauta } from "./pauta.js";
 import { atualizarCaderno, contextoDoChat, lerCaderno, limparCaderno } from "./memoria.js";
 import * as repo from "./repo.js";
 import { montarResumo } from "./resumo.js";
@@ -63,6 +64,7 @@ export type Comando =
   | { tipo: "retoma" }
   | { tipo: "custo" }
   | { tipo: "errado"; id: number; texto: string }
+  | { tipo: "item"; acao: "resolvi" | "adia" | "ignora" | "responde" | "cobra"; letra: string; resto: string; texto: string }
   | { tipo: "caderno"; limpar: boolean }
   | { tipo: "ajuda" }
   | { tipo: "pedido"; texto: string };
@@ -97,10 +99,41 @@ export function lerComando(texto: string): Comando {
   if (/^(retoma|retomar|volta a responder)[.!]?$/i.test(t)) return { tipo: "retoma" };
   if (/^(custo|gasto|consumo)[.!?]?$/i.test(t)) return { tipo: "custo" };
   if ((m = t.match(/^errado\s+#?(\d+)[\s:,.-]*([\s\S]*)$/i))) return { tipo: "errado", id: Number(m[1]), texto: m[2].trim() };
+  const item = itemDoComando(t);
+  if (item) return item;
   if (/^caderno[.!?]?$/i.test(t)) return { tipo: "caderno", limpar: false };
   if (/^(esquece|limpa)\s+(o\s+)?caderno[.!]?$/i.test(t)) return { tipo: "caderno", limpar: true };
   if (/^(ajuda|help|\?)$/i.test(t)) return { tipo: "ajuda" };
   return { tipo: "pedido", texto: t };
+}
+
+const VERBOS_ITEM: Record<string, "resolvi" | "adia" | "ignora" | "responde" | "cobra"> = {
+  resolvi: "resolvi",
+  resolvido: "resolvi",
+  feito: "resolvi",
+  "já foi": "resolvi",
+  "ja foi": "resolvi",
+  adia: "adia",
+  adiar: "adia",
+  ignora: "ignora",
+  ignorar: "ignora",
+  responde: "responde",
+  responder: "responde",
+  cobra: "cobra",
+  cobrar: "cobra",
+};
+
+/**
+ * "resolvi B", "adia C sábado", "responde A diz que amanhã eu ligo": a letra é do item
+ * do último resumo. "a", "e" e "o" minúsculos são palavras ("responde a Ana", "adia o
+ * almoço"), não letras: para eles, só maiúscula vale. O que não casar vai para o agente.
+ */
+export function itemDoComando(t: string): Extract<Comando, { tipo: "item" }> | null {
+  const m = t.match(/^(resolvi|resolvido|feito|j[áa] foi|adiar?|ignorar?|responder?|cobrar?)\s+(?:(?:o|a|item)\s+)?([a-zA-Z])(?=$|[\s:,.!-])[\s:,.!-]*([\s\S]*)$/i);
+  if (!m) return null;
+  const letra = m[2];
+  if (/[aeo]/.test(letra)) return null;
+  return { tipo: "item", acao: VERBOS_ITEM[m[1].toLowerCase()], letra: letra.toUpperCase(), resto: m[3].trim(), texto: t };
 }
 
 const AJUDA = `*Comandos*
@@ -120,6 +153,9 @@ const AJUDA = `*Comandos*
 • autonomia <nome> <0-3> — 0 só quando você pede · 1 propõe resposta · 2 envia se você não vetar · 3 envia o simples direto
 • veta N — não envia o rascunho N
 • pausa · retoma — desliga e religa todo envio automático
+• *Pelas letras do resumo* (A, B, C…):
+  resolvi B — já resolvi por fora (liguei, falei pessoalmente) · adia B sábado (amanhã, 3 dias, 25/10)
+  ignora B — não precisava de resposta, e eu aprendo · responde B <o quê> · cobra B
 • errado N <o quê> — corrige o compromisso N e eu aprendo para as próximas ("errado 1 quem vai ler é ele")
   (para o resto, diga com suas palavras: "a Thaís é notificação do KoreOS", "o João não espera resposta")
 • custo — quanto o assistente gastou com o Claude (hoje, 7 e 30 dias)
@@ -176,8 +212,11 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
     case "resumo": {
       if (deps.enviarResumo) return deps.enviarResumo();
       const r = await montarResumo(deps);
+      await gravarPauta(deps.db, r.pauta);
       return deps.avisar(r.texto, r.refs);
     }
+    case "item":
+      return agirNoItem(deps, c);
     case "errado":
       if (!c.texto) return deps.avisar(`Diga o que está errado: errado ${c.id} <o quê>.`);
       return deps.avisar(await corrigirLeitura(deps, { compromisso: c.id }, c.texto));
@@ -335,9 +374,42 @@ async function acharUm(deps: DepsControle, nome: string): Promise<repo.Contato |
   return alvo;
 }
 
+/** O que fazer com a letra: resolver, adiar e ignorar ficam em `pauta.ts`; responder e cobrar, aqui. */
+async function agirNoItem(deps: DepsControle, c: Extract<Comando, { tipo: "item" }>): Promise<void> {
+  const pauta = await lerPauta(deps.db);
+  // Sem resumo recente, a letra não aponta para nada: o agente lê a frase inteira.
+  if (!pauta.length) return atenderPedido(deps, c.texto);
+  const item = pauta.find((x) => x.letra === c.letra);
+  if (!item) return deps.avisar(`Não há item ${c.letra} no último resumo (${pauta.map((x) => x.letra).join(", ")}).`);
+
+  if (c.acao === "resolvi" || c.acao === "adia" || c.acao === "ignora") {
+    return deps.avisar(await cuidarDoItem(depsDaPauta(deps), item, c.acao, c.resto));
+  }
+  if (item.tipo === "email") {
+    return atenderPedido(deps, `Deixe no Gmail um rascunho de resposta ao e-mail "${item.titulo}" (id ${item.emailId}). ${c.resto}`);
+  }
+  if (!item.jid) return deps.avisar(`O ${item.letra} não é uma conversa para ${c.acao === "cobra" ? "cobrar" : "responder"}.`);
+  const contato = await repo.lerContato(deps.db, item.jid);
+  if (!contato || contato.excluido) return deps.avisar("Essa conversa não está mais no assistente.");
+  if (c.acao === "cobra") return cobrarContato(deps, contato);
+  await proporResposta(deps, contato.jid, c.resto || `Responder ao que está pendente: ${contato.situacao || "a última mensagem"}.`);
+}
+
+export function depsDaPauta(deps: DepsControle): DepsPauta {
+  return {
+    db: deps.db,
+    fuso: deps.fuso,
+    corrigir: (jid, correcao) => corrigirLeitura(deps, { jid }, correcao),
+  };
+}
+
 async function cobrar(deps: DepsControle, nome: string): Promise<void> {
   const c = await acharUm(deps, nome);
   if (!c) return;
+  return cobrarContato(deps, c);
+}
+
+async function cobrarContato(deps: DepsControle, c: repo.Contato): Promise<void> {
   const assunto = c.aguardando || "o que ficou pendente na conversa";
   await proporResposta(deps, c.jid, `Cobrar com educação, sem soar insistente: ${assunto}.`);
   await repo.marcarCobrado(deps.db, c.jid);
@@ -544,6 +616,29 @@ export function criarFerramentas(deps: DepsControle) {
         if (!contato) return "Conversa não encontrada: ache o jid com buscar_contato.";
         await repo.lembrar(db, contato.jid, [fato]);
         return "Guardado.";
+      },
+    }),
+    betaZodTool({
+      name: "cuidar_pendencia",
+      description:
+        "Dá baixa, adia ou ignora uma pendência: um item do último resumo pela letra, ou uma conversa pelo jid. Use quando ele disser que já resolveu por fora ('já liguei pro X'), que é para lembrar depois, ou que aquilo não precisava de resposta.",
+      inputSchema: z.object({
+        letra: z.string().nullable().describe("A letra do item no último resumo (A, B…), se ele citou"),
+        jid: z.string().nullable().describe("A conversa, se ele citou a pessoa pelo nome (ache com buscar_contato)"),
+        acao: z.enum(["resolvi", "adia", "ignora"]),
+        quando: z.string().nullable().describe("Para adiar: 'amanhã', 'sábado', '3 dias', '25/10'"),
+      }),
+      run: async ({ letra, jid, acao, quando }) => {
+        const item = letra
+          ? await itemDaPauta(db, letra)
+          : jid
+            ? await (async () => {
+                const c = await conversaDoAgente(db, jid);
+                return c ? { letra: "", tipo: "espera" as const, titulo: repo.nomeDe(c), jid: c.jid } : null;
+              })()
+            : null;
+        if (!item) return "Não achei esse item: diga a letra do resumo ou ache a pessoa com buscar_contato.";
+        return cuidarDoItem(depsDaPauta(deps), item, acao, quando ?? undefined);
       },
     }),
     betaZodTool({

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { dataCurta, relogio } from "./formato.js";
 import type { Ia } from "./ia.js";
 import { diaMes } from "./koreos.js";
+import { pautaDoCartao, type Item } from "./pauta.js";
 import { assuntoDe, diaPorExtenso, diasEsperando, esperandoRecente, ficouParaTras, remetente, type Dia } from "./resumo.js";
 
 /**
@@ -211,16 +212,19 @@ function limpo(t: string): string {
   return t.replace(/[\p{Extended_Pictographic}‍️]/gu, "").replace(/\s+/g, " ").trim();
 }
 
-function lista(titulo: string, itens: { titulo?: string; frase: string }[]): No {
+/** `marca`: a letra do item (resolvi A, adia B). Sem ela, um ponto: número confundiria com os #N dos compromissos. */
+function lista(titulo: string, itens: { titulo?: string; frase: string; marca?: string }[]): No {
   return h(
     "div",
     { flexDirection: "column", marginTop: 34 },
     h("div", { fontSize: 15, fontWeight: 600, color: COR.tinta, letterSpacing: 0.3, marginBottom: 6 }, titulo),
-    ...itens.map((it, i) =>
+    ...itens.map((it) =>
       h(
         "div",
         { flexDirection: "row", paddingTop: 14, paddingBottom: 14, borderBottom: `1px solid ${COR.linha}` },
-        h("div", { width: 34, fontSize: 15, color: COR.cinza }, String(i + 1)),
+        it.marca
+          ? h("div", { width: 34, fontSize: 17, fontWeight: 600, color: COR.argila }, it.marca)
+          : h("div", { width: 34, fontSize: 17, color: COR.cinza }, "·"),
         h(
           "div",
           { flexDirection: "column", flex: 1 },
@@ -251,9 +255,11 @@ async function carregarFontes() {
 }
 
 /** O cartão em PNG (960 px de largura, altura conforme o conteúdo, 2x para nitidez). */
-export async function desenharCartao(dia: Dia, plano: Plano, fuso: string): Promise<Buffer> {
+export async function desenharCartao(dia: Dia, plano: Plano, fuso: string, pauta = pautaDoCartao(dia, plano.precisa)): Promise<Buffer> {
   const desenho = `data:image/svg+xml;base64,${Buffer.from(relevo(dia, fuso)).toString("base64")}`;
   const paraTras = ficouParaTras(dia).slice(0, 5);
+  // A letra só aparece no que dá para resolver, adiar ou responder daqui.
+  const marca = (x: Item | undefined) => x?.letra || undefined;
   const nada = !plano.precisa.length && !plano.resolvido.length && !paraTras.length;
   const arvore = h(
     "div",
@@ -289,11 +295,11 @@ export async function desenharCartao(dia: Dia, plano: Plano, fuso: string): Prom
       nada
         ? h("div", { fontSize: 17, color: COR.tintaSuave, marginTop: 34 }, "Nada precisa de você esta manhã.")
         : null,
-      plano.precisa.length ? lista("Precisa de você", plano.precisa) : null,
+      plano.precisa.length ? lista("Precisa de você", plano.precisa.map((p, i) => ({ ...p, marca: marca(pauta.precisa[i]) }))) : null,
       paraTras.length
         ? lista(
             "Ficou para trás",
-            paraTras.map((e) => ({ titulo: e.nome, frase: `Há ${diasEsperando(e, dia.agora)} dias. ${assuntoDe(e)}` })),
+            paraTras.map((e, i) => ({ titulo: e.nome, frase: `Há ${diasEsperando(e, dia.agora)} dias. ${assuntoDe(e)}`, marca: pauta.ficou[i]?.letra })),
           )
         : null,
       plano.resolvido.length ? lista("Resolvido", plano.resolvido) : null,

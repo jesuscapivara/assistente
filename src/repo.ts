@@ -337,7 +337,8 @@ export async function esperandoResposta(
     `SELECT c.jid, ${NOME_SQL} AS nome, c.situacao, u.texto AS ultima, u.enviada_em AS quando, u.de_mim
      FROM contatos c
      JOIN LATERAL (SELECT texto, enviada_em, de_mim FROM mensagens WHERE chat_jid = c.jid ORDER BY enviada_em DESC LIMIT 1) u ON TRUE
-     WHERE c.espera_resposta AND NOT c.grupo AND NOT c.sistema AND NOT c.excluido`,
+     WHERE c.espera_resposta AND NOT c.grupo AND NOT c.sistema AND NOT c.excluido
+       AND (c.adiado_ate IS NULL OR c.adiado_ate <= now())`,
   );
   const corte = Date.now() - horas * 3600_000;
   return r.rows

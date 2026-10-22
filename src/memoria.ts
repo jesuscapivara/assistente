@@ -2,6 +2,7 @@ import { z } from "zod";
 import { gravarEstado, lerEstado, type Db } from "./db.js";
 import { agoraPorExtenso, dataCurta } from "./formato.js";
 import type { Ia } from "./ia.js";
+import { lerPauta, pautaEmTexto } from "./pauta.js";
 import * as repo from "./repo.js";
 
 /**
@@ -38,11 +39,13 @@ function falaEmTexto(f: repo.Fala, dono: string, fuso: string, limite = 700): st
  */
 export async function contextoDoChat(db: Db, dono: string, fuso: string, pedido: string): Promise<string> {
   const caderno = await lerCaderno(db);
+  const pauta = await lerPauta(db);
   const falas = await repo.dialogoRecente(db, FALAS + 1, 48);
   const ultima = falas.at(-1);
   if (ultima?.autor === "dono" && ultima.texto.trim() === pedido.trim()) falas.pop();
   return [
     caderno ? `CADERNO (o que está em andamento entre você e ${dono}):\n${caderno}` : "",
+    pauta.length ? `LETRAS DO ÚLTIMO RESUMO ("o B" = este item):\n${pautaEmTexto(pauta)}` : "",
     falas.length ? `CONVERSA RECENTE NESTE CHAT (mais nova por último):\n${falas.map((f) => falaEmTexto(f, dono, fuso)).join("\n")}` : "",
   ]
     .filter(Boolean)
