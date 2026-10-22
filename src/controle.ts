@@ -482,6 +482,16 @@ function sistemaAgente(dono: string, perfil: string, extras: string[]): string {
 
 /** Pedido em linguagem livre: vai para o Claude com as ferramentas de consulta. */
 async function atenderPedido(deps: DepsControle, texto: string): Promise<void> {
+  await deps.avisar(await responderPedido(deps, texto));
+  // Depois de responder: o dono não espera por isto.
+  void atualizarCaderno(deps).catch(() => undefined);
+}
+
+/**
+ * O pedido livre respondido pelo agente, devolvendo o texto em vez de mandar ao
+ * WhatsApp: o chat usa via `atenderPedido`, e o painel mostra a resposta na tela.
+ */
+export async function responderPedido(deps: DepsControle, texto: string): Promise<string> {
   const perfil = repo.perfilEmTexto(await repo.lerPerfil(deps.db));
   const extras: string[] = [];
   const ferramentas: any[] = criarFerramentas(deps);
@@ -507,9 +517,7 @@ async function atenderPedido(deps: DepsControle, texto: string): Promise<void> {
     ferramentas,
     mcp: koreos ? { nome: "koreos", ...koreos } : undefined,
   });
-  await deps.avisar(resposta || "Não consegui concluir isso. Tente pedir de outro jeito ou em partes.");
-  // Depois de responder: o dono não espera por isto.
-  void atualizarCaderno(deps).catch(() => undefined);
+  return resposta || "Não consegui concluir isso. Tente pedir de outro jeito ou em partes.";
 }
 
 const ASSUNTO_KOREOS =

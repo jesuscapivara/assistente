@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel v2 · maquete</title>
+<!-- Maquete do painel v2 do assistente. Dados fictícios. Abas por rádio, sem JavaScript. -->
+<style>
+:root{--fundo:#FCFCFB;--faixa:#F9F9F7;--tinta:#2E2C27;--suave:#6B6A63;--cinza:#B4B3A8;--linha:#E4E3DC;--borda:#E1E1DF;--argila:#C6613F;--argila2:#AE5133;--bolha:#F1F0EB;--minha:#F6E7DF;--verde:#5B7F5E}
+@media (prefers-color-scheme:dark){:root{--fundo:#1A1917;--faixa:#21201D;--tinta:#ECEAE3;--suave:#A6A49B;--cinza:#6F6D66;--linha:#34322E;--borda:#34322E;--argila:#D8754F;--argila2:#E58A63;--bolha:#2A2926;--minha:#3A2C25;--verde:#8DB291}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--fundo);color:var(--tinta)}
+body{font:15px/1.45 -apple-system,"Segoe UI",Inter,system-ui,sans-serif;padding-bottom:76px}
+.serif{font-family:Fraunces,"Iowan Old Style",Georgia,serif;font-weight:600}
+input[name=aba]{display:none}.tela{display:none}
+#a1:checked~.telas #t1,#a2:checked~.telas #t2,#a3:checked~.telas #t3,#a4:checked~.telas #t4{display:block}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--faixa);border-top:1px solid var(--borda);display:grid;grid-template-columns:repeat(4,1fr);padding:6px 0 calc(6px + env(safe-area-inset-bottom))}
+nav label{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--suave);cursor:pointer;position:relative}
+nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8}
+#a1:checked~nav [for=a1],#a2:checked~nav [for=a2],#a3:checked~nav [for=a3],#a4:checked~nav [for=a4]{color:var(--argila)}
+.badge{position:absolute;top:-2px;left:calc(50% + 6px);background:var(--argila);color:#fff;border-radius:9px;font-size:10px;padding:0 5px;line-height:16px}
+.topo{background:var(--faixa);border-bottom:1px solid var(--borda);padding:22px 16px 18px}.topo p{margin:0}
+.data{color:var(--suave);font-size:13px}.manchete{font-size:28px;line-height:1.15;margin:4px 0 0}
+.wrap{padding:0 16px}h2{font-size:15px;margin:26px 0 8px;display:flex;justify-content:space-between;align-items:baseline}h2 small{font-weight:400;color:var(--suave);font-size:13px}
+.agora{margin:16px 16px 0;border:1px solid var(--argila);border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center;background:var(--fundo)}
+.agora b{display:block}.agora .em{color:var(--argila);font-weight:600;font-size:13px}.agora .acao{margin-left:auto}
+.btn{display:inline-block;font:inherit;font-size:13px;border:1px solid var(--borda);border-radius:8px;padding:6px 11px;background:transparent;color:var(--tinta)}
+.btn.p{background:var(--argila);border-color:var(--argila);color:#FCFCFB;font-weight:500}
+.tl{list-style:none;margin:0;padding:0;position:relative}.tl:before{content:"";position:absolute;left:46px;top:6px;bottom:6px;width:1px;background:var(--linha)}
+.tl li{display:grid;grid-template-columns:40px 14px 1fr;gap:6px;padding:7px 0;align-items:start}
+.tl .h{font-size:13px;color:var(--suave);text-align:right;padding-top:1px}.tl .d{width:11px;height:11px;border-radius:50%;background:var(--tinta);margin-top:5px;position:relative;z-index:1}
+.tl .d.p{background:var(--argila)}.tl .d.v{background:transparent;border:2px solid var(--cinza)}.tl .d.f{border-radius:2px;background:var(--argila)}
+.tl .t b{font-weight:600}.tl .t p{margin:1px 0 0;color:var(--suave);font-size:13px}.tl .agoraLinha{grid-column:1/-1;border-top:1px dashed var(--argila);margin:2px 0 2px 40px;position:relative}
+.tl .agoraLinha span{position:absolute;right:0;top:-9px;background:var(--fundo);color:var(--argila);font-size:11px;padding-left:6px}
+.card{border:1px solid var(--linha);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:var(--fundo)}
+.card .cab{display:flex;gap:10px;align-items:center}.card .cab b{font-size:15px}.card .cab .meta{color:var(--suave);font-size:12px;margin-left:auto;white-space:nowrap}
+.av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:600;color:#fff;flex:none}
+.sit{color:var(--suave);font-size:13.5px;margin:8px 0 8px}
+.bolhas{display:flex;flex-direction:column;gap:4px;margin:6px 0 10px}.bb{max-width:85%;padding:6px 10px;border-radius:12px;font-size:13.5px;background:var(--bolha);align-self:flex-start}
+.bb.eu{background:var(--minha);align-self:flex-end}.bb i{display:block;font-style:normal;font-size:10.5px;color:var(--suave);margin-top:1px;text-align:right}
+.acoes{display:flex;gap:6px;flex-wrap:wrap}.chip{font-size:12.5px;border:1px solid var(--borda);border-radius:20px;padding:5px 11px;background:transparent;color:var(--tinta)}
+.chip.s{border-style:dashed;color:var(--suave)}
+.tag{font-size:11px;border-radius:10px;padding:1px 8px;background:var(--bolha);color:var(--suave)}.tag.a{background:var(--minha);color:var(--argila)}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.mini div{border:1px solid var(--linha);border-radius:10px;padding:9px 10px}.mini b{display:block;font-size:20px}.mini span{font-size:12px;color:var(--suave)}
+.busca{display:flex;gap:8px;margin:14px 0 6px}.busca input,.campo{flex:1;font:inherit;border:1px solid var(--borda);border-radius:10px;padding:9px 12px;background:transparent;color:var(--tinta)}
+.filtros{display:flex;gap:6px;overflow-x:auto;padding:4px 0 2px}.filtros .chip.on{background:var(--tinta);color:var(--fundo);border-color:var(--tinta)}
+.lista{list-style:none;margin:0;padding:0}.lista li{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--linha);align-items:center}
+.lista .n{flex:1;min-width:0}.lista .n b{display:block}.lista .n p{margin:0;color:var(--suave);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lista .r{text-align:right;font-size:12px;color:var(--suave)}.ponto{width:8px;height:8px;border-radius:50%;background:var(--argila);display:inline-block}
+.ficha{border:1px solid var(--linha);border-radius:12px;padding:14px;margin-top:6px}.ficha h3{margin:0;font-size:18px}.ficha dl{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;margin:12px 0 0;font-size:13.5px}.ficha dt{color:var(--suave)}.ficha dd{margin:0}
+.chat{border:1px solid var(--linha);border-radius:12px;overflow:hidden;margin-top:6px}.chat .cab{padding:10px 12px;border-bottom:1px solid var(--linha);display:flex;gap:10px;align-items:center;background:var(--faixa)}
+.chat .corpo{padding:10px 12px;display:flex;flex-direction:column;gap:5px;max-height:none}.chat .dia{align-self:center;font-size:11px;color:var(--suave);margin:4px 0}
+.chat .pe{border-top:1px solid var(--linha);padding:10px 12px;background:var(--faixa)}.chat textarea{width:100%;font:inherit;border:1px solid var(--borda);border-radius:10px;padding:8px 10px;background:var(--fundo);color:var(--tinta);resize:none}
+.sugest{display:flex;gap:6px;overflow-x:auto;margin:8px 0}
+.qa{border-left:2px solid var(--argila);padding:2px 0 2px 12px;margin:12px 0}.qa .q{font-weight:600}.qa .r{color:var(--suave);font-size:13.5px;margin-top:3px}
+.barras{display:flex;align-items:flex-end;gap:3px;height:70px;margin:8px 0 2px}.barras i{flex:1;background:var(--argila);opacity:.85;border-radius:2px 2px 0 0}
+.leg{display:flex;justify-content:space-between;font-size:11px;color:var(--suave)}
+.relevo{width:100%;height:auto;display:block;margin:12px 0 0}
+</style></head><body>
+<input type="radio" name="aba" id="a1" checked><input type="radio" name="aba" id="a2"><input type="radio" name="aba" id="a3"><input type="radio" name="aba" id="a4">
+<div class="telas">
+
+<!-- ═════════ HOJE ═════════ -->
+<section class="tela" id="t1">
+<div class="topo"><p class="data">quinta-feira, 22/10</p><p class="manchete serif">Duas ligações e o memorial antes das 18h, Lucas.</p>
+<svg class="relevo" viewBox="0 0 840 120"><polyline points="0,100 120,100 180,98 230,60 280,98 400,100 470,100 520,40 560,40 600,98 700,100 840,100" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="230" cy="60" r="8" fill="currentColor"/><circle cx="540" cy="40" r="10" fill="currentColor"/><path d="M 780 100 L 780 62 L 804 69 L 780 76" fill="none" stroke="#C6613F" stroke-width="2.5"/></svg></div>
+
+<div class="agora"><div><span class="em">EM 25 MIN · 13:30</span><b>Ligar para o Arq. Rafael Duarte</b><span style="color:var(--suave);font-size:13px">Você prometeu às 12:20 · perícia do imóvel</span></div><span class="acao"><span class="btn p">Liguei</span></span></div>
+
+<div class="wrap">
+<h2>Linha do dia <small>5 itens</small></h2>
+<ul class="tl">
+<li><span class="h">09:00</span><span class="d"></span><span class="t"><b>Reunião de obra — Residencial Aurora</b><p>Feita · 3 combinados anotados</p></span></li>
+<li><span class="h">11:30</span><span class="d v"></span><span class="t"><b>Ana pediu retorno sobre a visita</b><p>WhatsApp · ainda sem resposta</p></span></li>
+<li class="agoraLinha"><span>agora 13:05</span></li>
+<li><span class="h">13:30</span><span class="d p"></span><span class="t"><b>Ligar para o Rafael</b><p>Promessa sua · lembrete às 13:20</p></span></li>
+<li><span class="h">15:00</span><span class="d"></span><span class="t"><b>Revisão do projeto elétrico</b><p>Meet · com Paulo e Carla · <u>briefing</u></p></span></li>
+<li><span class="h">18:00</span><span class="d f"></span><span class="t"><b>Prazo: memorial descritivo</b><p>Casa Jardins · KoreOS + combinado com o Paulo</p></span></li>
+</ul>
+
+<h2>Precisa de você <small>3</small></h2>
+<div class="card"><div class="cab"><span class="av" style="background:#8A6FB0">AR</span><b>Ana Ribeiro</b><span class="tag">cliente</span><span class="meta">há 6 h</span></div>
+<p class="sit">Você convidou a Ana para visitar a obra; ela disse que sábado está mais livre. Falta propor o horário.</p>
+<div class="bolhas"><span class="bb eu">Que tal visitar a obra essa semana?<i>ontem 18:40</i></span><span class="bb">Sábado eu estaria mais livre 😊<i>07:10</i></span></div>
+<div class="sugest"><span class="chip s">“Sábado às 10h fica bom?”</span><span class="chip s">“Sábado de manhã, te confirmo o horário”</span></div>
+<div class="acoes"><span class="btn p">Responder</span><span class="btn">Resolvi</span><span class="btn">Adiar ▾</span><span class="btn">Ignorar</span></div></div>
+
+<div class="card"><div class="cab"><span class="av" style="background:#C6613F">PT</span><b>Mandar o memorial descritivo</b><span class="meta">hoje 18:00</span></div>
+<p class="sit">Combinado com o Paulo Teixeira na terça. Também é tarefa sua no KoreOS (Casa Jardins), vence hoje.</p>
+<div class="acoes"><span class="btn p">Feito</span><span class="btn">Adiar ▾</span><span class="btn">Abrir no KoreOS</span></div></div>
+
+<h2>Ficou para trás <small>1</small></h2>
+<div class="card"><div class="cab"><span class="av" style="background:#5B7F5E">BL</span><b>Bruno Lima</b><span class="tag a">há 9 dias</span></div>
+<p class="sit">Ajudando com o certificado digital; pediu que você ligue quando puder.</p>
+<div class="acoes"><span class="btn p">Liguei</span><span class="btn">Responder</span><span class="btn">Adiar ▾</span><span class="btn">Ignorar</span></div></div>
+
+<h2>Escritório <small>KoreOS</small></h2>
+<div class="mini"><div><b>1</b><span>vence hoje</span></div><div><b>4</b><span>atrasadas</span></div><div><b>R$ 805</b><span>a pagar hoje</span></div></div>
+</div>
+</section>
+
+<!-- ═════════ CONVERSAS ═════════ -->
+<section class="tela" id="t2">
+<div class="topo"><p class="data">Conversas</p><p class="manchete serif">3 esperam você.</p></div>
+<div class="wrap">
+<div class="filtros" style="margin-top:14px"><span class="chip on">Esperando (3)</span><span class="chip">Todas</span><span class="chip">E-mail (2)</span><span class="chip">Grupos</span></div>
+<ul class="lista">
+<li><span class="av" style="background:#8A6FB0">AR</span><div class="n"><b>Ana Ribeiro</b><p>Sábado eu estaria mais livre 😊</p></div><div class="r">07:10<br><span class="ponto"></span></div></li>
+<li><span class="av" style="background:#5B7F5E">BL</span><div class="n"><b>Bruno Lima</b><p>me liga quando puder</p></div><div class="r">13/10<br><span class="tag a">9d</span></div></li>
+<li><span class="av" style="background:#3E6D8E">✉</span><div class="n"><b>Carla Mendes · e-mail</b><p>Re: Proposta Clínica Centro — revisão</p></div><div class="r">ontem<br><span class="ponto"></span></div></li>
+<li><span class="av" style="background:#9A8F7A">PT</span><div class="n"><b>Paulo Teixeira</b><p>Você: te mando até amanhã</p></div><div class="r">ter</div></li>
+</ul>
+
+<h2>Abrindo a Ana <small>exemplo</small></h2>
+<div class="chat"><div class="cab"><span class="av" style="background:#8A6FB0">AR</span><div><b>Ana Ribeiro</b><div style="font-size:12px;color:var(--suave)">cliente · Residencial Aurora · autonomia 0</div></div></div>
+<div class="corpo"><span class="dia">ONTEM</span><span class="bb">Oi Lucas! Como está a obra?<i>17:58</i></span><span class="bb eu">Andando bem! Que tal visitar essa semana?<i>18:40</i></span><span class="dia">HOJE</span><span class="bb">Sábado eu estaria mais livre 😊<i>07:10</i></span></div>
+<div class="pe"><div style="font-size:12.5px;color:var(--suave);margin-bottom:6px"><b style="color:var(--tinta)">Situação:</b> falta você propor o horário de sábado.</div>
+<div class="sugest"><span class="chip s">Sábado às 10h</span><span class="chip s">Sábado de manhã</span><span class="chip s">Próxima semana</span></div>
+<textarea rows="2" placeholder="O que dizer (eu escrevo no seu jeito e você aprova)"></textarea>
+<div class="acoes" style="margin-top:8px"><span class="btn p">Escrever rascunho</span><span class="btn">Resolvi</span><span class="btn">Adiar ▾</span></div></div></div>
+</div>
+</section>
+
+<!-- ═════════ PESSOAS ═════════ -->
+<section class="tela" id="t3">
+<div class="topo"><p class="data">Pessoas</p><p class="manchete serif">142 conversas, 2 aniversários na semana.</p></div>
+<div class="wrap">
+<div class="busca"><input placeholder="Buscar nome, empresa, assunto…"></div>
+<div class="filtros"><span class="chip on">Todos</span><span class="chip">Clientes</span><span class="chip">Família</span><span class="chip">Sumidos (5)</span><span class="chip">Aniversários</span></div>
+<ul class="lista">
+<li><span class="av" style="background:#8A6FB0">AR</span><div class="n"><b>Ana Ribeiro</b><p>Cliente · Residencial Aurora</p></div><div class="r">hoje</div></li>
+<li><span class="av" style="background:#C69B3F">CM</span><div class="n"><b>Carla Mendes</b><p>🎂 amanhã · arquiteta parceira</p></div><div class="r">2d</div></li>
+<li><span class="av" style="background:#6F8EA6">JP</span><div class="n"><b>João Prado</b><p>Cliente · sem conversa há 34 dias</p></div><div class="r"><span class="tag a">sumido</span></div></li>
+</ul>
+
+<h2>Ficha <small>exemplo</small></h2>
+<div class="ficha"><div style="display:flex;gap:12px;align-items:center"><span class="av" style="background:#8A6FB0;width:46px;height:46px;font-size:16px">AR</span><div><h3>Ana Ribeiro</h3><span class="tag">cliente</span> <span class="tag">autonomia 0</span></div></div>
+<dl><dt>Quem é</dt><dd>Dona do apartamento no Residencial Aurora; decide junto com o marido, Ricardo.</dd>
+<dt>Agora</dt><dd>Visita à obra no sábado, falta o horário.</dd>
+<dt>Você espera</dt><dd>As medidas da cozinha (desde 15/10)</dd>
+<dt>Combinados</dt><dd>#12 mandar o orçamento da bancada · sexta</dd>
+<dt>Datas</dt><dd>🎂 14/03</dd>
+<dt>Como você fala</dt><dd>Informal, curto, com emoji; chama de “Aninha”.</dd>
+<dt>Fatos</dt><dd>Prefere falar depois das 17h · tem dois filhos</dd></dl>
+<div class="acoes" style="margin-top:12px"><span class="btn">Corrigir algo</span><span class="btn">Autonomia ▾</span><span class="btn">Tirar do assistente</span></div></div>
+</div>
+</section>
+
+<!-- ═════════ ASSISTENTE ═════════ -->
+<section class="tela" id="t4">
+<div class="topo"><p class="data">Assistente</p><p class="manchete serif">Pergunte qualquer coisa.</p></div>
+<div class="wrap">
+<div class="busca"><input placeholder="O que eu combinei com a Ana?"><span class="btn p">Perguntar</span></div>
+<div class="qa"><div class="q">Quando o Paulo mandou as medidas?</div><div class="r">Ele ainda não mandou. Na terça (20/10) disse “te mando amanhã cedo”; está em “você espera” na ficha dele.</div></div>
+<div class="qa"><div class="q">Marca com a Ana sábado às 10h</div><div class="r">Criei o evento “Visita à obra — Ana Ribeiro”, sábado 24/10, 10h–11h. Quer que eu escreva a confirmação para ela?</div></div>
+
+<h2>Gasto com o Claude <small>30 dias · US$ 0,61</small></h2>
+<div class="barras"><i style="height:90%"></i><i style="height:30%"></i><i style="height:25%"></i><i style="height:40%"></i><i style="height:22%"></i><i style="height:18%"></i><i style="height:35%"></i><i style="height:28%"></i><i style="height:20%"></i><i style="height:24%"></i><i style="height:31%"></i><i style="height:15%"></i><i style="height:19%"></i><i style="height:26%"></i></div>
+<div class="leg"><span>09/10</span><span>hoje · US$ 0,04</span></div>
+
+<h2>O que estou acompanhando <small>caderno</small></h2>
+<p class="sit" style="margin-top:0">• Você pediu o resumo com nomes; já está assim.<br>• Esperando você confirmar o horário com a Ana.</p>
+
+<h2>O que aprendi <small>3 lições</small></h2>
+<ul class="lista"><li><div class="n"><b style="font-weight:500">Quem escreve “vou ler” é quem lê.</b><p>De uma correção sua, 22/10</p></div><span class="btn">Apagar</span></li>
+<li><div class="n"><b style="font-weight:500">Meme não pede resposta.</b><p>De um “ignora”, 22/10</p></div><span class="btn">Apagar</span></li></ul>
+</div>
+</section>
+</div>
+
+<nav>
+<label for="a1"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8M5 10v10h14V10"/></svg>Hoje<span class="badge">3</span></label>
+<label for="a2"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg>Conversas<span class="badge">3</span></label>
+<label for="a3"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>Pessoas</label>
+<label for="a4"><svg viewBox="0 0 24 24"><path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z"/></svg>Assistente</label>
+</nav>
+</body></html>

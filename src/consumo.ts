@@ -99,3 +99,25 @@ export async function relatorioDeCusto(db: Db): Promise<string> {
     .filter(Boolean)
     .join("\n\n");
 }
+
+/** Gasto de cada um dos últimos `dias` dias (no fuso do dono), do mais antigo ao de hoje. */
+export async function custoPorDia(db: Db, fuso: string, dias = 30): Promise<{ dia: string; custo: number }[]> {
+  const r = await db.query<{ dia: string; modelo: string; entrada: string; saida: string; cache_leitura: string; cache_escrita: string }>(
+    `SELECT to_char(criado_em AT TIME ZONE $1, 'YYYY-MM-DD') AS dia, modelo,
+            sum(entrada) AS entrada, sum(saida) AS saida, sum(cache_leitura) AS cache_leitura, sum(cache_escrita) AS cache_escrita
+     FROM consumo WHERE criado_em > now() - make_interval(days => $2)
+     GROUP BY 1, 2`,
+    [fuso, dias],
+  );
+  const porDia = new Map<string, number>();
+  for (const x of r.rows) {
+    const c = custoDe({ modelo: x.modelo, entrada: Number(x.entrada), saida: Number(x.saida), cacheLeitura: Number(x.cache_leitura), cacheEscrita: Number(x.cache_escrita) });
+    porDia.set(x.dia, (porDia.get(x.dia) ?? 0) + c);
+  }
+  // Todos os dias aparecem, inclusive os de gasto zero: o gráfico mostra o ritmo.
+  const hoje = Date.parse(`${new Intl.DateTimeFormat("en-CA", { timeZone: fuso }).format(new Date())}T12:00:00Z`);
+  return Array.from({ length: dias }, (_, i) => {
+    const dia = new Date(hoje - (dias - 1 - i) * 86400_000).toISOString().slice(0, 10); // fuso: data civil
+    return { dia, custo: porDia.get(dia) ?? 0 };
+  });
+}

@@ -17,10 +17,11 @@ export interface Contato {
   situacao: string;
   espera_resposta: boolean;
   sistema: boolean;
+  sugestoes: string;
 }
 
 const COLUNAS_CONTATO =
-  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema";
+  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema, sugestoes";
 
 export interface Mensagem {
   id: string;
@@ -357,12 +358,23 @@ export async function esperandoResposta(
 export async function atualizarConversa(
   db: Db,
   jid: string,
-  c: { situacao: string; esperaResposta: boolean; sistema?: boolean },
+  c: { situacao: string; esperaResposta: boolean; sistema?: boolean; sugestoes?: string[] },
 ): Promise<void> {
+  // Sugestão só faz sentido enquanto alguém espera resposta.
+  const sugestoes = c.esperaResposta ? (c.sugestoes ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 3) : [];
   await db.query(
-    `UPDATE contatos SET situacao = $2, espera_resposta = $3, sistema = sistema OR $4, atualizado_em = now() WHERE jid = $1`,
-    [jid, c.situacao.trim(), c.esperaResposta, c.sistema ?? false],
+    `UPDATE contatos SET situacao = $2, espera_resposta = $3, sistema = sistema OR $4, sugestoes = $5, atualizado_em = now() WHERE jid = $1`,
+    [jid, c.situacao.trim(), c.esperaResposta, c.sistema ?? false, JSON.stringify(sugestoes)],
   );
+}
+
+export function sugestoesDe(c: { sugestoes?: string | null }): string[] {
+  try {
+    const x = JSON.parse(c.sugestoes ?? "[]");
+    return Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** O dono respondeu: até a próxima leitura, ninguém ali espera por ele. */

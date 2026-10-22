@@ -51,6 +51,11 @@ export const ExtracaoSchema = z.object({
   automatica: z
     .boolean()
     .describe("O outro lado é um sistema, não uma pessoa: notificação automática, banco, loja, código de verificação, robô"),
+  sugestoes: z
+    .array(z.string())
+    .describe(
+      "Só se precisa_resposta: 2 ou 3 caminhos de resposta, curtos (até 6 palavras), como o dono pediria a um assistente: 'Sábado às 10h', 'Próxima semana', 'Peço as medidas'. Nunca prometa valor nem prazo que a conversa não tem. Vazio se não precisa resposta",
+    ),
 });
 export type Extracao = z.infer<typeof ExtracaoSchema>;
 
@@ -63,6 +68,7 @@ export const EXTRACAO_VAZIA: Extracao = {
   aguardando: null,
   situacao: "",
   automatica: false,
+  sugestoes: [],
 };
 
 export interface EntradaExtracao {

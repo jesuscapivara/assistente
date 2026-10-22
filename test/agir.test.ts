@@ -4,7 +4,7 @@ import { lerConfig } from "../src/config.js";
 import { lerComando, sugerirSubir } from "../src/controle.js";
 import { criarGoogle, horariosLivres } from "../src/google.js";
 import { dataCurta, meiaNoiteEm } from "../src/formato.js";
-import { comandoDoPainel } from "../src/painel.js";
+import { comandoDoPainel, voltaSegura } from "../src/painel.js";
 
 const SP = "America/Sao_Paulo";
 
@@ -186,5 +186,22 @@ describe("log sem segredo", () => {
     expect(ocultarToken("/webhook/segredo123")).toBe("/webhook/***");
     expect(ocultarToken("/painel/abc/acao")).toBe("/painel/***/acao");
     expect(ocultarToken("/saude")).toBe("/saude");
+  });
+});
+
+describe("painel: volta e ações novas", () => {
+  it("volta só para a consulta das abas", () => {
+    expect(voltaSegura("aba=conversas&c=5511%40s.whatsapp.net")).toBe("aba=conversas&c=5511%40s.whatsapp.net");
+    expect(voltaSegura("aba=pessoas&q=ana&f=cliente")).toBe("aba=pessoas&q=ana&f=cliente");
+    expect(voltaSegura("//outro.site")).toBe("");
+    expect(voltaSegura("aba=hoje&redirect=x")).toBe("");
+    expect(voltaSegura(undefined)).toBe("");
+  });
+
+  it("perguntar junta o texto e o complemento; corrigir pede o que está errado", () => {
+    expect(comandoDoPainel({ acao: "perguntar", texto: "Rascunho para o e-mail X.", extra: " diz que sim " })).toEqual({ perguntar: "Rascunho para o e-mail X. diz que sim" });
+    expect(comandoDoPainel({ acao: "perguntar", texto: "  " })).toBeNull();
+    expect(comandoDoPainel({ acao: "corrigir", jid: "x@s.whatsapp.net", texto: "é fornecedora" })).toEqual({ corrigir: { jid: "x@s.whatsapp.net", texto: "é fornecedora" } });
+    expect(comandoDoPainel({ acao: "corrigir", jid: "x@s.whatsapp.net", texto: "" })).toBeNull();
   });
 });

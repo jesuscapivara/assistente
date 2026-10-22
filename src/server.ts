@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { lerImagem } from "./midia.js";
+import { voltaSegura } from "./painel.js";
 
 function tokenConfere(recebido: string, esperado: string): boolean {
   const a = Buffer.from(recebido);
@@ -14,8 +15,8 @@ export function ocultarToken(url: string): string {
 
 export interface OpcoesPainel {
   token: string;
-  /** `aviso`: o resultado da última ação, mostrado uma vez no alto da página. */
-  pagina(base: string, aviso?: string): Promise<string>;
+  /** `aviso`: o resultado da última ação, mostrado uma vez no alto. `consulta`: aba e item abertos. */
+  pagina(base: string, aviso: string, consulta: Record<string, string>): Promise<string>;
   acao(campos: Record<string, string>): Promise<string | void>;
 }
 
@@ -68,18 +69,20 @@ export function criarServidor(opts: {
     // Um dono só: o resultado da última ação fica aqui até a página recarregar. Na URL,
     // iria para o log com o nome das pessoas.
     let aviso = "";
-    app.get<{ Params: { token: string } }>("/painel/:token", async (req, reply) => {
+    app.get<{ Params: { token: string }; Querystring: Record<string, string> }>("/painel/:token", async (req, reply) => {
       if (!tokenConfere(req.params.token, painel.token)) return reply.code(404).send();
       reply.header("Cache-Control", "no-store").header("X-Robots-Tag", "noindex").type("text/html; charset=utf-8");
       const mostrar = aviso;
       aviso = "";
-      return painel.pagina(`/painel/${req.params.token}`, mostrar);
+      return painel.pagina(`/painel/${req.params.token}`, mostrar, req.query ?? {});
     });
     app.post<{ Params: { token: string }; Body: Record<string, string> }>("/painel/:token/acao", async (req, reply) => {
       if (!tokenConfere(req.params.token, painel.token)) return reply.code(404).send();
       aviso = (await painel.acao(req.body ?? {}).catch((err) => `Não deu certo: ${String(err).slice(0, 200)}`)) || "";
-      // Volta para a página: recarregar não repete a ação.
-      return reply.redirect(`/painel/${req.params.token}`, 303);
+      // Volta para a mesma tela (aba, conversa ou ficha): recarregar não repete a ação.
+      // `voltaSegura` só deixa passar a consulta das abas, nunca outro endereço.
+      const volta = voltaSegura(req.body?.volta);
+      return reply.redirect(`/painel/${req.params.token}${volta ? `?${volta}` : ""}`, 303);
     });
   }
 

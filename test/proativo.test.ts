@@ -45,7 +45,7 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
   };
 }
 
-const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false };
+const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false, sugestoes: [] };
 
 class IaFalsa implements Ia {
   extracao: Extracao = vazio;
@@ -447,7 +447,23 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     await ing(msg(FERNANDA, "oi"));
     await repo.criarRascunho(db, FERNANDA, "Oi Fê <script>", "x");
     const html = await paginaDoPainel(deps, "/painel/T", { fuso: SP, dono: "Lucas", niveis: ["a", "b", "c", "d"], padrao: 0 });
-    expect(html).toContain("#1 para Fernanda");
+    expect(html).toContain("Para Fernanda");
+    // As outras abas abrem com os dados da mesma conversa.
+    await repo.atualizarConversa(db, FERNANDA, { situacao: "Ela perguntou do orçamento.", esperaResposta: true, sugestoes: ["Mando amanhã", "Peço as medidas"] });
+    const opcoes = { fuso: SP, dono: "Lucas", niveis: ["a", "b", "c", "d"], padrao: 0 };
+    const conversas = await paginaDoPainel(deps, "/painel/T", opcoes, "", { aba: "conversas" });
+    expect(conversas).toContain("1 espera você.");
+    expect(conversas).toContain(`c=${encodeURIComponent(FERNANDA)}`);
+    const aberta = await paginaDoPainel(deps, "/painel/T", opcoes, "", { aba: "conversas", c: FERNANDA });
+    expect(aberta).toContain("Situação:</b> Ela perguntou do orçamento.");
+    expect(aberta).toContain(">Mando amanhã</button>");
+    expect(aberta).toContain(`name="volta" value="aba=conversas&amp;c=${encodeURIComponent(FERNANDA)}"`);
+    const pessoa = await paginaDoPainel(deps, "/painel/T", opcoes, "", { aba: "pessoas", p: FERNANDA });
+    expect(pessoa).toContain("<h3>Fernanda</h3>");
+    expect(pessoa).toContain("Corrigir algo que entendi errado");
+    const assistente = await paginaDoPainel(deps, "/painel/T", opcoes, "Feito.", { aba: "assistente" });
+    expect(assistente).toContain("Gasto com o Claude");
+    expect(assistente).toContain('<p class="aviso">Feito.</p>');
     expect(html).toContain("Oi Fê &lt;script&gt;");
     expect(html).not.toContain("<script>");
 
@@ -465,10 +481,11 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
       method: "POST",
       url: `/painel/${"t".repeat(24)}/acao`,
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      payload: "acao=enviar&id=1",
+      payload: "acao=enviar&id=1&volta=aba%3Dpessoas%26p%3Dx%2540s.whatsapp.net",
     });
     expect(post.statusCode).toBe(303);
-    expect(acoes).toEqual([{ acao: "enviar", id: "1" }]);
+    expect(post.headers.location).toBe(`/painel/${"t".repeat(24)}?aba=pessoas&p=x%40s.whatsapp.net`);
+    expect(acoes).toEqual([{ acao: "enviar", id: "1", volta: "aba=pessoas&p=x%40s.whatsapp.net" }]);
     // A confirmação aparece uma vez, no carregamento seguinte, e some.
     expect((await app.inject({ method: "GET", url: `/painel/${"t".repeat(24)}` })).body).toBe("<html>Baixa dada.</html>");
     expect((await app.inject({ method: "GET", url: `/painel/${"t".repeat(24)}` })).body).toBe("<html></html>");

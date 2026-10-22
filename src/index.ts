@@ -4,10 +4,12 @@ import { desenharCartao, planoDoCartao } from "./cartao.js";
 import { expediente, googleLigado, jidsDoDono, lerConfig, urlInterna } from "./config.js";
 import { estudar } from "./conhecer.js";
 import { registrarUso } from "./consumo.js";
-import { depsDaPauta, NIVEIS, tratarComando, type DepsControle } from "./controle.js";
-import { limparCaderno } from "./memoria.js";
+import { depsDaPauta, NIVEIS, responderPedido, tratarComando, type DepsControle } from "./controle.js";
+import { corrigirLeitura } from "./corrigir.js";
+import { atualizarCaderno, limparCaderno } from "./memoria.js";
 import { proporResposta } from "./rascunho.js";
-import { abrirDb, migrar } from "./db.js";
+import { abrirDb, gravarEstado, migrar } from "./db.js";
+import { relogio } from "./formato.js";
 import { lerSituacoesPendentes, rodadaDeExtracao } from "./extracao.js";
 import { criarKoreosDireto } from "./koreos.js";
 import { guardarImagem } from "./midia.js";
@@ -74,6 +76,8 @@ async function enviarResumo(): Promise<void> {
     try {
       const plano = await planoDoCartao(ia, dia, cfg.DONO_NOME, cfg.FUSO);
       const pauta = pautaDoCartao(dia, plano.precisa);
+      // O painel reaproveita a frase do dia, sem chamar o modelo de novo.
+      await gravarEstado(db, "manchete", JSON.stringify({ dia: relogio(dia.agora, cfg.FUSO).dia, texto: plano.manchete })).catch(() => undefined);
       const png = await desenharCartao(dia, plano, cfg.FUSO, pauta);
       const url = `${urlInterna(cfg)}/midia/${guardarImagem(png)}.png`;
       const compromissos = [...dia.comData, ...dia.semData].map((c) => `#${c.id} ${c.descricao}`).slice(0, 8);
@@ -191,7 +195,7 @@ const app = criarServidor({
   painel: cfg.PAINEL_TOKEN
     ? {
         token: cfg.PAINEL_TOKEN,
-        pagina: (b, aviso) => paginaDoPainel(base, b, { fuso: cfg.FUSO, dono: cfg.DONO_NOME, niveis: NIVEIS, padrao: cfg.AUTONOMIA_PADRAO }, aviso),
+        pagina: (b, aviso, consulta) => paginaDoPainel(base, b, { fuso: cfg.FUSO, dono: cfg.DONO_NOME, niveis: NIVEIS, padrao: cfg.AUTONOMIA_PADRAO }, aviso, consulta),
         acao: async (campos) => {
           const c = comandoDoPainel(campos);
           if (!c) return "Não entendi esse botão.";
@@ -212,7 +216,17 @@ const app = criarServidor({
             const ct = await repo.lerContato(db, c.responder.jid);
             if (!ct || ct.excluido) return "Essa conversa não está mais no assistente.";
             const id = await proporResposta(depsControle, ct.jid, c.responder.instrucao || `Responder ao que está pendente: ${ct.situacao || "a última mensagem"}.`);
-            return `Rascunho #${id} pronto: está no alto da página e no seu WhatsApp.`;
+            return `Rascunho #${id} pronto: está aqui embaixo e no seu WhatsApp.`;
+          }
+          if ("corrigir" in c) return corrigirLeitura(depsControle, { jid: c.corrigir.jid }, c.corrigir.texto);
+          if ("perguntar" in c) {
+            // Pela tela, a conversa fica no diálogo como se fosse no chat: o "sim" seguinte,
+            // em qualquer um dos dois, sabe a que responde.
+            await repo.registrarFala(db, "dono", c.perguntar).catch(() => undefined);
+            const resposta = await responderPedido(depsControle, c.perguntar);
+            await repo.registrarFala(db, "assistente", resposta).catch(() => undefined);
+            void atualizarCaderno(base).catch(() => undefined);
+            return "";
           }
           return cuidarDoItem(depsDaPauta(depsControle), c.pendencia.item, c.pendencia.acao, c.pendencia.quando);
         },

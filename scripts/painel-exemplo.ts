@@ -1,5 +1,5 @@
 // Gera o painel com dados fictícios num Postgres vazio, para conferir o desenho:
-// `DATABASE_URL_TESTE=postgres://... npx tsx scripts/painel-exemplo.ts painel.html`.
+// `DATABASE_URL_TESTE=postgres://... npx tsx scripts/painel-exemplo.ts <pasta>` (uma página por aba).
 // O banco é limpo, como nos testes de fluxo.
 import { writeFile } from "node:fs/promises";
 import { abrirDb, gravarEstado, migrar } from "../src/db.js";
@@ -21,7 +21,7 @@ for (const [jid, nome, quando, texto, situacao] of [
 ] as const) {
   await repo.garantirContato(db, jid, { grupo: false, nomePush: nome });
   await repo.gravarMensagem(db, { id: `m-${jid}`, chatJid: jid, remetenteJid: jid, remetenteNome: nome, deMim: false, grupo: false, tipo: "texto", texto, enviadaEm: new Date(quando), bruto: {}, jidAlternativo: null }, texto, true);
-  if (situacao) await repo.atualizarConversa(db, jid, { situacao, esperaResposta: true });
+  if (situacao) await repo.atualizarConversa(db, jid, { situacao, esperaResposta: true, sugestoes: jid === ANA ? ["Sábado às 10h", "Sábado de manhã", "Próxima semana"] : [] });
 }
 await repo.atualizarFicha(db, PAULO, { relacao: "cliente", resumo: "Cliente da Casa Jardins" });
 await repo.criarCompromisso(db, { chatJid: PAULO, descricao: "Mandar o memorial descritivo", quando: new Date(Date.now() + 5 * 3600_000), responsavel: "eu" });
@@ -39,12 +39,23 @@ for (const [funcao, modelo, entrada, saida] of [
   await db.query("INSERT INTO consumo (funcao, modelo, entrada, saida) VALUES ($1,$2,$3,$4)", [funcao, modelo, entrada, saida]);
 }
 
-const html = await paginaDoPainel(
-  { db, ia: null as never, dono: "Lucas", fuso: "America/Sao_Paulo" },
-  "/painel/x",
-  { fuso: "America/Sao_Paulo", dono: "Lucas", niveis: ["só quando você pede", "propõe", "envia se não vetar", "envia direto"], padrao: 0 },
-  "Baixa dada: Bruno Lima saiu da lista.",
-);
-await writeFile(process.argv[2] ?? "painel.html", html);
+await repo.gravarMensagem(db, { id: "m-ana-2", chatJid: ANA, remetenteJid: null, remetenteNome: null, deMim: true, grupo: false, tipo: "texto", texto: "Que tal visitar a obra essa semana?", enviadaEm: new Date(Date.now() - 20 * 3600_000), bruto: {}, jidAlternativo: null }, "Que tal visitar a obra essa semana?", true);
+await repo.atualizarFicha(db, ANA, { relacao: "cliente", resumo: "Dona do apartamento no Residencial Aurora", tom: "Informal, curto, com emoji" });
+await repo.lembrar(db, ANA, ["Prefere falar depois das 17h", "Marido se chama Ricardo"]);
+await repo.registrarFala(db, "dono", "O que eu combinei com a Ana?");
+await repo.registrarFala(db, "assistente", "Você convidou a Ana para visitar a obra; ela disse que sábado está mais livre. Falta propor o horário.");
+const deps = { db, ia: null as never, dono: "Lucas", fuso: "America/Sao_Paulo" };
+const opts = { fuso: "America/Sao_Paulo", dono: "Lucas", niveis: ["só quando você pede", "propõe", "envia se não vetar", "envia direto"], padrao: 0 };
+const pasta = process.argv[2] ?? ".";
+for (const [arq, consulta, aviso] of [
+  ["hoje.html", {}, "Baixa dada: Bruno Lima saiu da lista."],
+  ["conversas.html", { aba: "conversas" }, ""],
+  ["conversa.html", { aba: "conversas", c: ANA }, ""],
+  ["pessoas.html", { aba: "pessoas" }, ""],
+  ["ficha.html", { aba: "pessoas", p: ANA }, ""],
+  ["assistente.html", { aba: "assistente" }, ""],
+] as const) {
+  await writeFile(`${pasta}/${arq}`, await paginaDoPainel(deps, "/painel/x", opts, aviso, consulta));
+}
 await db.end();
 console.log("ok");

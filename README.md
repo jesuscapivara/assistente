@@ -91,12 +91,23 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `caderno` · `esquece caderno` | o que ele está acompanhando entre vocês; zera |
 | `resumo` · `ajuda` | |
 
-O **painel web** é o cartão da manhã ao vivo, no mesmo desenho, com um botão em cada item:
-rascunhos para enviar, ajustar ou descartar; compromissos e quem espera resposta com
-Resolvi, Adiar e Ignorar, e Responder; "Ficou para trás"; o KoreOS; o que os outros ficaram
-de fazer; o gasto por função; o caderno, as regras e as lições (com Apagar); e a autonomia
-de cada pessoa. Não chama modelo nenhum. Os comandos de sempre respondem no WhatsApp; as
-ações dos itens confirmam na própria tela.
+O **painel web** é um app de quatro abas, no mesmo desenho do cartão (maquete validada em
+`docs/maquetes/painel-v2.html`):
+
+- **Hoje**: a próxima coisa ("em 25 min: ligar para…" com o botão Liguei), a linha do dia
+  (reuniões, promessas suas e prazos, com a marca de agora), rascunhos para aprovar, e cada
+  pendência como um cartão com as últimas mensagens, sugestões de resposta e Resolvi,
+  Adiar e Ignorar. Também "Ficou para trás", o que os outros ficaram de fazer e o KoreOS.
+- **Conversas**: quem espera você, todas, e-mails e grupos; a conversa aberta com a
+  situação, os atalhos de resposta e o rascunho na sua voz.
+- **Pessoas**: busca e filtros (clientes, família, sumidos, aniversários) e a ficha de cada
+  uma, com "corrigir algo que entendi errado" e a autonomia.
+- **Assistente**: perguntar com a resposta na tela, o gasto por dia e por função, o
+  caderno, as regras e as lições.
+
+Nenhuma tela chama modelo; só Perguntar e Escrever rascunho, quando usados. As sugestões
+de resposta saem da mesma leitura que já define a situação da conversa. Os comandos de
+sempre respondem no WhatsApp; as ações dos itens confirmam na própria tela.
 
 ## Instalação na VM de staging
 

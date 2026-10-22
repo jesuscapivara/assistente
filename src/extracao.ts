@@ -150,6 +150,7 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
   await repo.atualizarConversa(db, jid, {
     situacao: r.situacao,
     esperaResposta: r.precisa_resposta && !ultima.de_mim && !contato.grupo && !sistema,
+    sugestoes: r.sugestoes,
     sistema: !contato.grupo && r.automatica,
   });
   await repo.marcarExtraidas(db, jid, ate);
@@ -207,6 +208,7 @@ export async function lerSituacoesPendentes(deps: DepsExtracao, limite = 40): Pr
         // Sem nada em andamento, marca assim mesmo: senão a mesma conversa volta toda vez.
         situacao: x.situacao || "nada em andamento",
         esperaResposta: x.precisa_resposta && !ultima.de_mim && !sistema && !semConteudo(ultima),
+        sugestoes: x.sugestoes,
         sistema: x.automatica,
       });
       lidas++;

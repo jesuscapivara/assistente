@@ -45,7 +45,7 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
 
 class IaFalsa implements Ia {
   extracoes: EntradaExtracao[] = [];
-  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false };
+  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false, sugestoes: [] };
   textos: string[] = [];
   sistemas: string[] = [];
   estruturados: unknown[] = [];
@@ -168,6 +168,7 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
       aguardando: null,
       situacao: "Ela pediu o orçamento até amanhã.",
       automatica: false,
+      sugestoes: [],
     };
 
     await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
