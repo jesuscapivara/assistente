@@ -16,6 +16,8 @@ describe("lerComando", () => {
     ["ignora #2", { tipo: "compromisso", acao: "descartado", id: 2 }],
     ["fora Grupo da Família", { tipo: "excluir", nome: "Grupo da Família" }],
     ["volta Pedro", { tipo: "incluir", nome: "Pedro" }],
+    ["inclui o projetos@exemplo.com.br no meet de amanhã e manda o email", { tipo: "pedido", texto: "inclui o projetos@exemplo.com.br no meet de amanhã e manda o email" }],
+    ["inclui o Pedro na reunião de sexta", { tipo: "pedido", texto: "inclui o Pedro na reunião de sexta" }],
     ["resumo", { tipo: "resumo" }],
     ["perfil", { tipo: "perfil" }],
     ["regra: nunca marco nada antes das 9", { tipo: "regra", texto: "nunca marco nada antes das 9" }],

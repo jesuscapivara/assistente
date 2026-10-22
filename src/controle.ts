@@ -85,8 +85,8 @@ export function lerComando(texto: string): Comando {
       | "descartado";
     return { tipo: "compromisso", acao, id: Number(m[2]) };
   }
-  if ((m = t.match(/^(fora|exclui|excluir)\s+(.+)$/i))) return { tipo: "excluir", nome: m[2].trim() };
-  if ((m = t.match(/^(volta|inclui|incluir)\s+(.+)$/i))) return { tipo: "incluir", nome: m[2].trim() };
+  if ((m = t.match(/^(fora|exclui|excluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "excluir", nome: m[2].trim() };
+  if ((m = t.match(/^(volta|inclui|incluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "incluir", nome: m[2].trim() };
   if (/^(resumo|bom dia)[.!]?$/i.test(t)) return { tipo: "resumo" };
   if (/^(perfil|meu perfil)[.!?]?$/i.test(t)) return { tipo: "perfil" };
   if ((m = t.match(/^regra[\s:,-]+([\s\S]+)$/i))) return { tipo: "regra", texto: m[1].trim() };
@@ -525,6 +525,16 @@ export async function responderPedido(deps: DepsControle, texto: string): Promis
     mcp: koreos ? { nome: "koreos", ...koreos } : undefined,
   });
   return resposta || "Não consegui concluir isso. Tente pedir de outro jeito ou em partes.";
+}
+
+/**
+ * "fora <nome>" e "inclui <nome>" só são comando quando o resto é um nome de contato ou
+ * grupo. "inclui o fulano@x.com no meet de amanhã e manda o email" é pedido livre: virava
+ * a busca de um contato com a frase inteira, e a resposta era "Não achei".
+ */
+function pareceNome(resto: string): boolean {
+  const s = resto.trim();
+  return !s.includes("@") && s.split(/\s+/).length <= 5 && !/\b(meet|reuni|evento|agenda|e-?mail|manda|envia|convit)/i.test(s);
 }
 
 /**
