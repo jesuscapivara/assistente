@@ -60,7 +60,7 @@ async function classificar(deps: DepsAutonomia, conversa: string, texto: string)
   const r = await deps.ia
     .estruturar(RiscoSchema, {
       sistema: `Você decide se uma resposta de WhatsApp pode sair sem o dono (${deps.dono}) revisar.
-Baixo risco: confirmar recebimento, horário já combinado, agradecer, cumprimento, "vejo e te falo", resposta factual sem compromisso novo.
+Baixo risco: confirmar recebimento, horário já combinado, agradecer, cumprimento, "vejo e te falo", resposta factual sem compromisso novo, e reagir a foto ou novidade que a pessoa compartilhou ("ficou top!", "parabéns!") sem prometer nada.
 Alto risco: qualquer compromisso novo, dinheiro, prazo, opinião técnica, negociação, reclamação, assunto pessoal ou delicado, ou se o rascunho pode estar errado sobre algo. Na dúvida, alto.`,
       conteudo: `CONVERSA:\n${conversa}\n\nRESPOSTA PROPOSTA:\n${texto}`,
       esforco: "low",
@@ -82,7 +82,9 @@ export async function responderSozinho(deps: DepsAutonomia, jid: string): Promis
   const texto = await escreverRascunho(
     deps,
     jid,
-    "Responda a última mensagem do contato, do jeito que o dono responderia. Se precisar de algo que só ele sabe (decisão, valor, data, opinião), deixe [preencher: …].",
+    "Responda a última mensagem do contato, do jeito que o dono responderia. Se precisar de algo que só ele sabe (decisão, valor, data, opinião), deixe [preencher: …]. " +
+      "Se for foto ou novidade compartilhada, reaja ao que ela mostra de fato (cite o detalhe: o boné, a loja, a aprovação), curto e com a energia do dono; nunca um elogio genérico que serviria para qualquer foto, e não repita a frase de reações anteriores. " +
+      "Se não dá para saber o que é (vídeo, arquivo ou foto sem descrição), deixe [preencher: o que achou].",
   );
   const id = await repo.criarRascunho(deps.db, jid, texto, "resposta proposta pelo assistente");
   const contato = await repo.lerContato(deps.db, jid);

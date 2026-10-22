@@ -12,6 +12,8 @@ export interface Ia {
   agente(pedido: PedidoAgente): Promise<string>;
   /** Resposta em JSON validado pelo schema; `null` se o modelo recusar ou não fechar o JSON. */
   estruturar<T extends z.ZodType>(schema: T, pedido: PedidoTexto): Promise<z.infer<T> | null>;
+  /** O que a foto mostra, numa frase: é o que deixa o assistente reagir a ela. */
+  verImagem(imagem: { buffer: Buffer; mimetype: string }, legenda: string): Promise<string>;
 }
 
 export const ExtracaoSchema = z.object({
@@ -35,6 +37,11 @@ export const ExtracaoSchema = z.object({
     .array(z.string())
     .describe("Fatos duradouros sobre o contato que valem lembrar (família, trabalho, preferências)"),
   precisa_resposta: z.boolean().describe("A última mensagem é do contato e espera algo do dono"),
+  reacao: z
+    .boolean()
+    .describe(
+      "A última mensagem é do contato e compartilha algo sem pedir nada (foto, vídeo, novidade, conquista, notícia boa) que pede só uma reação curta do dono",
+    ),
   urgente: z
     .boolean()
     .describe("Pede atenção do dono hoje: prazo para hoje, problema, cliente insatisfeito, emergência de família"),
@@ -63,6 +70,7 @@ export const EXTRACAO_VAZIA: Extracao = {
   compromissos: [],
   fatos: [],
   precisa_resposta: false,
+  reacao: false,
   urgente: false,
   motivo_urgencia: "",
   aguardando: null,
@@ -129,6 +137,7 @@ Extraia apenas o que está no trecho marcado como NOVO; o trecho ANTERIOR é só
 - Urgente só quando o dono deveria ver hoje; conversa normal não é urgente.
 - Aguardando: olhe a conversa inteira (ANTERIOR + NOVO). Se o contato ficou de mandar ou fazer algo para o dono e ainda não fez, descreva; se já entregou ou não há nada, null.
 - Precisa resposta: só se a última mensagem é do contato e pede algo do dono (pergunta, proposta, pedido, convite em aberto). "Ok", "valeu", "disponha", "tá ok", emoji ou fim de assunto não pedem resposta.
+- Reação: a última mensagem é do contato e mostra algo sem pedir nada (foto do produto novo, obra pronta, aprovação saiu, vídeo, notícia boa). Não é "precisa resposta", mas pede um "que legal" do dono. Se o dono já reagiu, não é.
 - Situação: leia também as mensagens do dono. Uma resposta curta do contato ("sábado eu estaria mais livre") só faz sentido junto com o que o dono disse antes; a situação junta as duas pontas.
 - Se não houver nada, devolva listas vazias.`;
 
@@ -218,6 +227,28 @@ export function criarIa(opts: {
       registrar(p.funcao, modelo, resp.usage);
       if (resp.stop_reason === "refusal") return null;
       return (resp.parsed_output ?? null) as z.infer<typeof schema> | null;
+    },
+
+    async verImagem(imagem, legenda) {
+      const tipo = imagem.mimetype.split(";")[0].trim();
+      if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(tipo)) return "";
+      const resp = await client.beta.messages.create({
+        model: opts.modeloLeve,
+        max_tokens: 300,
+        system:
+          "Descreva a foto que alguém mandou no WhatsApp, numa frase curta em português, com o que importa para responder: o objeto, produto, lugar ou conquista, e a marca ou texto que aparecer. Sem preâmbulo.",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: tipo as "image/jpeg", data: imagem.buffer.toString("base64") } },
+              { type: "text", text: legenda ? `Legenda: ${legenda}` : "Sem legenda." },
+            ],
+          },
+        ],
+      });
+      registrar("imagem", opts.modeloLeve, resp.usage);
+      return resp.stop_reason === "refusal" ? "" : textoDe(resp.content).trim();
     },
 
     async agente(p) {

@@ -45,11 +45,14 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
 
 class IaFalsa implements Ia {
   extracoes: EntradaExtracao[] = [];
-  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false, sugestoes: [] };
+  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, reacao: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false, sugestoes: [] };
   textos: string[] = [];
   sistemas: string[] = [];
   estruturados: unknown[] = [];
   pedidosEstruturados: string[] = [];
+  async verImagem() {
+    return "";
+  }
   async estruturar(_schema: unknown, p: { conteudo: string }) {
     this.pedidosEstruturados.push(p.conteudo);
     return (this.estruturados.shift() ?? null) as any;
@@ -162,6 +165,7 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
         { descricao: "ver a cor da bancada", quando: null, quem_faz: "dono" },
       ],
       fatos: ["marido se chama Ricardo"],
+      reacao: false,
       precisa_resposta: true,
       urgente: false,
       motivo_urgencia: "",

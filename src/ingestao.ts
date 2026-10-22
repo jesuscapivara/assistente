@@ -11,6 +11,8 @@ export interface DepsIngestao {
   aoComandoAudio?(msg: MensagemRecebida): Promise<void>;
   /** Áudio recebido numa conversa: transcreve em segundo plano, quando houver como. */
   aoAudio?(msg: MensagemRecebida): Promise<void>;
+  /** Foto recebida numa conversa individual: descreve em segundo plano, para a leitura e a resposta. */
+  aoImagem?(msg: MensagemRecebida): Promise<void>;
   /** Histórico gravado: hora de conhecer as pessoas. */
   aoHistorico?(gravadas: number): Promise<void>;
   log?: (o: object, txt: string) => void;
@@ -70,6 +72,10 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
 
   if (m.tipo === "audio" && deps.aoAudio) {
     void deps.aoAudio(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "transcrição falhou"));
+  }
+  // Foto de contato, em conversa individual: em grupo seria custo sem retorno.
+  if (m.tipo === "imagem" && !m.grupo && !m.deMim && deps.aoImagem) {
+    void deps.aoImagem(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "leitura da foto falhou"));
   }
   return "gravado";
 }

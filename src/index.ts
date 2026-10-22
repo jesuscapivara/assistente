@@ -189,6 +189,10 @@ const app = criarServidor({
             if (texto) await db.query("UPDATE mensagens SET texto = $2 WHERE id = $1", [msg.id, `[áudio] ${texto}`]);
           }
         : undefined,
+      aoImagem: async (msg) => {
+        const d = await ia.verImagem(await evolution.baixarMidia(msg.bruto), msg.texto);
+        if (d) await db.query("UPDATE mensagens SET texto = $2 WHERE id = $1", [msg.id, `[foto: ${d}]${msg.texto ? ` ${msg.texto}` : ""}`]);
+      },
       aoHistorico: async (n) => agendarEstudoDoHistorico(n),
       log,
     }),

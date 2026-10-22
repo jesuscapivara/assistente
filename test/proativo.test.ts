@@ -45,7 +45,7 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
   };
 }
 
-const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false, sugestoes: [] };
+const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, reacao: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false, sugestoes: [] };
 
 class IaFalsa implements Ia {
   extracao: Extracao = vazio;
@@ -61,6 +61,9 @@ class IaFalsa implements Ia {
     return p.conteudo.includes("PEDIDO de") ? this.rascunho : `resumo: ${p.conteudo.length} caracteres`;
   }
   async agente() {
+    return "";
+  }
+  async verImagem() {
     return "";
   }
   async estruturar() {
@@ -173,6 +176,15 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     ia.extracao = { ...vazio, aguardando: null };
     await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
     expect((await repo.lerContato(db, FERNANDA))?.aguardando).toBe("");
+  });
+
+  it("foto compartilhada pede reação: chama a autonomia, mas não entra nas pendências", async () => {
+    await ing(msg(FERNANDA, "olha o boné novo da empresa", { quando: new Date(Date.now() - 600_000) }));
+    ia.extracao = { ...vazio, reacao: true, situacao: "Mandou a foto do boné novo da empresa." };
+    const pediram: string[] = [];
+    await extrairChat({ ...deps, quietoMin: 0, aoPrecisarResposta: async (j) => void pediram.push(j) }, FERNANDA);
+    expect(pediram).toEqual([FERNANDA]);
+    expect((await repo.lerContato(db, FERNANDA))?.espera_resposta).toBe(false);
   });
 
   it("cobrança: pergunta uma vez por assunto, e 'cobra' propõe o rascunho", async () => {

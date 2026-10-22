@@ -160,7 +160,9 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
   if (r.urgente && !ultima.de_mim && (await repo.alertaNovo(db, `urgente:${ultima.id}`))) {
     await deps.avisar(`⚡ *${nome}*${contato.grupo ? " (grupo)" : ""}: ${r.motivo_urgencia || "pede atenção"}\n> ${ultima.texto.slice(0, 300)}`);
   }
-  if (r.precisa_resposta && !contato.grupo && !sistema && !ultima.de_mim && deps.aoPrecisarResposta) {
+  // A reação ("que legal!") não entra na lista de pendências, mas a autonomia pode
+  // respondê-la: é o contato que manda foto e novidade e espera só um retorno.
+  if ((r.precisa_resposta || r.reacao) && !contato.grupo && !sistema && !ultima.de_mim && deps.aoPrecisarResposta) {
     await deps.aoPrecisarResposta(jid);
   }
 
