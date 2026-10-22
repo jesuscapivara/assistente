@@ -22,10 +22,13 @@ const Esquema = z.object({
   DONO_LIDS: z.string().default(""),
   DONO_NOME: z.string().default("Lucas"),
 
-  // Claude. O modelo pode ser trocado por rota sem mexer no código.
+  // Claude, um modelo por tipo de trabalho. MODELO escreve na voz do dono e responde
+  // as perguntas; MODELO_EXTRACAO lê cada conversa nova; MODELO_LEVE faz fichas,
+  // lições, briefing, risco e a memória do chat. O comando `custo` mostra o efeito.
   ANTHROPIC_API_KEY: z.string().optional(),
-  MODELO: z.string().default("claude-opus-5-5"),
-  MODELO_EXTRACAO: z.string().default("claude-opus-5-5"),
+  MODELO: z.string().default("claude-sonnet-5-5"),
+  MODELO_EXTRACAO: z.string().default("claude-haiku-5-5"),
+  MODELO_LEVE: z.string().default("claude-haiku-5-5"),
 
   // Áudio: opcional. Sem a chave, o áudio entra como "[áudio]" e não é transcrito.
   OPENAI_API_KEY: z.string().optional(),
@@ -59,6 +62,16 @@ const Esquema = z.object({
 
   // Painel web (opcional). Sem token, a rota não existe.
   PAINEL_TOKEN: z.string().min(24).optional(),
+
+  // Resumo da manhã como imagem (o cartão), com o texto curto na legenda. A Evolution
+  // busca a imagem em URL_INTERNA (o endereço do assistente na rede do Docker; sem ela,
+  // a origem de WEBHOOK_URL_PUBLICA). Se a imagem falhar, sai o texto.
+  RESUMO_IMAGEM: z
+    .enum(["0", "1"])
+    .default("1")
+    .transform((v) => v === "1"),
+  URL_INTERNA: z.string().url().optional(),
+  WEBHOOK_URL_PUBLICA: z.string().url().optional(),
 
   FUSO: z.string().default("America/Sao_Paulo"),
   RESUMO_HORA: z
@@ -97,6 +110,13 @@ export function jidsDoDono(cfg: Pick<Config, "DONO_NUMERO" | "DONO_LIDS">): Set<
 
 export function googleLigado(cfg: Config): boolean {
   return Boolean(cfg.GOOGLE_CLIENT_ID && cfg.GOOGLE_CLIENT_SECRET && cfg.GOOGLE_REFRESH_TOKEN);
+}
+
+/** De onde a Evolution busca o que o assistente serve (o cartão do resumo). */
+export function urlInterna(cfg: Config): string {
+  if (cfg.URL_INTERNA) return cfg.URL_INTERNA.replace(/\/+$/, "");
+  if (cfg.WEBHOOK_URL_PUBLICA) return new URL(cfg.WEBHOOK_URL_PUBLICA).origin;
+  return `http://assistente:${cfg.PORT}`;
 }
 
 export function expediente(cfg: Config): { inicioH: number; fimH: number } {

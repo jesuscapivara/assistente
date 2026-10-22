@@ -46,7 +46,11 @@ describe("config", () => {
 
   it("valida e aplica os padrões", () => {
     const c = lerConfig(base);
-    expect(c.MODELO).toBe("claude-opus-5-5");
+    // Voz e perguntas no Sonnet; leitura e o resto no Haiku (o Opus custa o dobro do Sonnet e 40x o Haiku).
+    expect(c.MODELO).toBe("claude-sonnet-5-5");
+    expect(c.MODELO_EXTRACAO).toBe("claude-haiku-5-5");
+    expect(c.MODELO_LEVE).toBe("claude-haiku-5-5");
+    expect(c.RESUMO_IMAGEM).toBe(true);
     expect(c.RESUMO_HORA).toBe("07:30");
   });
 

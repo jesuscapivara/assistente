@@ -14,10 +14,13 @@ export interface Contato {
   assuntos_abertos: string;
   aguardando: string;
   autonomia: number | null;
+  situacao: string;
+  espera_resposta: boolean;
+  sistema: boolean;
 }
 
 const COLUNAS_CONTATO =
-  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia";
+  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema";
 
 export interface Mensagem {
   id: string;
@@ -47,9 +50,22 @@ export interface Rascunho {
   status: string;
 }
 
+/**
+ * Como a pessoa aparece para o dono. Sem nome na agenda nem no perfil, o número
+ * formatado; e o LID, que é um código interno do WhatsApp e não um telefone, nunca
+ * aparece: "#81690412224708" não diz nada a ninguém.
+ */
 export function nomeDe(c: Pick<Contato, "nome" | "nome_push" | "jid">): string {
-  return c.nome || c.nome_push || c.jid.split("@")[0];
+  if (c.nome || c.nome_push) return (c.nome || c.nome_push)!;
+  return c.jid.endsWith("@s.whatsapp.net") ? `+${c.jid.split("@")[0]}` : "contato sem nome";
 }
+
+/** O mesmo `nomeDe`, em SQL. `a` é o apelido da tabela de contatos ("c" ou ""). */
+export function nomeSql(a = "c"): string {
+  const p = a ? `${a}.` : "";
+  return `COALESCE(${p}nome, ${p}nome_push, CASE WHEN ${p}jid LIKE '%@s.whatsapp.net' THEN '+' || split_part(${p}jid, '@', 1) ELSE 'contato sem nome' END)`;
+}
+export const NOME_SQL = nomeSql("c");
 
 /** Garante o contato e devolve se ele está fora do assistente. */
 export async function garantirContato(
@@ -106,11 +122,14 @@ export async function registrarApelido(db: Db, a: string, b: string): Promise<st
     if (velho.rowCount) {
       await c.query(
         `INSERT INTO contatos (jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos,
-                               aguardando, aguardando_desde, cobrado_em, autonomia, ficha_em)
+                               aguardando, aguardando_desde, cobrado_em, autonomia, ficha_em, situacao, espera_resposta, sistema)
          SELECT $1, nome, nome_push, FALSE, excluido, memoria, relacao, resumo, tom, assuntos_abertos,
-                aguardando, aguardando_desde, cobrado_em, autonomia, ficha_em
+                aguardando, aguardando_desde, cobrado_em, autonomia, ficha_em, situacao, espera_resposta, sistema
          FROM contatos WHERE jid = $2
          ON CONFLICT (jid) DO UPDATE SET
+           situacao = CASE WHEN contatos.situacao = '' THEN EXCLUDED.situacao ELSE contatos.situacao END,
+           espera_resposta = contatos.espera_resposta OR EXCLUDED.espera_resposta,
+           sistema = contatos.sistema OR EXCLUDED.sistema,
            nome = COALESCE(contatos.nome, EXCLUDED.nome),
            nome_push = COALESCE(contatos.nome_push, EXCLUDED.nome_push),
            excluido = contatos.excluido OR EXCLUDED.excluido,
@@ -201,11 +220,13 @@ export async function lerContato(db: Db, jid: string): Promise<Contato | null> {
 /** Busca por nome (ou trecho do número), nos dois nomes que o contato pode ter. */
 export async function buscarContatos(db: Db, termo: string, limite = 8): Promise<Contato[]> {
   const r = await db.query<Contato>(
-    `SELECT c.jid, c.nome, c.nome_push, c.grupo, c.excluido, c.memoria, c.relacao, c.resumo, c.tom, c.assuntos_abertos,
-            c.aguardando, c.autonomia
+    `SELECT ${COLUNAS_CONTATO.split(", ").map((x) => `c.${x}`).join(", ")}
      FROM contatos c
      LEFT JOIN LATERAL (SELECT max(enviada_em) AS ultima FROM mensagens WHERE chat_jid = c.jid) u ON TRUE
      WHERE c.nome ILIKE $1 OR c.nome_push ILIKE $1 OR c.jid ILIKE $1
+        -- Contato sem nome se acha pelo que se sabe dele ("o cliente da pavimentação"),
+        -- mas só quando nenhum nome bate: senão "cobra João" acharia quem fala do João.
+        OR (c.resumo ILIKE $1 AND NOT EXISTS (SELECT 1 FROM contatos n WHERE n.nome ILIKE $1 OR n.nome_push ILIKE $1))
      ORDER BY u.ultima DESC NULLS LAST LIMIT $2`,
     [`%${termo}%`, limite],
   );
@@ -246,6 +267,7 @@ export async function excluirChat(db: Db, jid: string, excluido: boolean): Promi
     await c.query("BEGIN");
     await c.query(
       `UPDATE contatos SET excluido = TRUE, memoria = '', relacao = NULL, resumo = '', tom = '', assuntos_abertos = '',
+         situacao = '', espera_resposta = FALSE,
          aguardando = '', aguardando_desde = NULL, cobrado_em = NULL, autonomia = NULL, ficha_em = NULL, atualizado_em = now()
        WHERE jid = $1`,
       [jid],
@@ -292,33 +314,91 @@ export async function compromissosAbertos(db: Db, ate?: Date): Promise<Compromis
 }
 
 export async function mudarCompromisso(db: Db, id: number, status: string): Promise<boolean> {
-  const r = await db.query("UPDATE compromissos SET status = $2 WHERE id = $1", [id, status]);
+  const r = await db.query(
+    `UPDATE compromissos SET status = $2,
+       decidido_em = CASE WHEN $2 IN ('feito', 'descartado') THEN now() ELSE decidido_em END
+     WHERE id = $1`,
+    [id, status],
+  );
   return (r.rowCount ?? 0) > 0;
 }
 
 /**
- * Conversas individuais em que a última palavra é do outro, há mais de `horas`
- * horas: é a lista do "quem está esperando resposta".
+ * Quem espera resposta do dono há mais de `horas` horas: a leitura da conversa disse
+ * que sim (`espera_resposta`), é gente (não sistema) e a última palavra ainda é do
+ * outro. A situação vai junto: a última mensagem sozinha não diz do que se trata.
  */
 export async function esperandoResposta(
   db: Db,
   horas: number,
   limite = 15,
-): Promise<{ jid: string; nome: string; ultima: string; quando: Date }[]> {
-  const r = await db.query<{ jid: string; nome: string; ultima: string; quando: Date }>(
-    `SELECT DISTINCT ON (m.chat_jid) m.chat_jid AS jid,
-            COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome,
-            m.texto AS ultima, m.enviada_em AS quando, m.de_mim
-     FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
-     WHERE NOT c.grupo AND NOT c.excluido
-     ORDER BY m.chat_jid, m.enviada_em DESC`,
+): Promise<{ jid: string; nome: string; ultima: string; quando: Date; situacao: string }[]> {
+  const r = await db.query<{ jid: string; nome: string; ultima: string; quando: Date; situacao: string; de_mim: boolean }>(
+    `SELECT c.jid, ${NOME_SQL} AS nome, c.situacao, u.texto AS ultima, u.enviada_em AS quando, u.de_mim
+     FROM contatos c
+     JOIN LATERAL (SELECT texto, enviada_em, de_mim FROM mensagens WHERE chat_jid = c.jid ORDER BY enviada_em DESC LIMIT 1) u ON TRUE
+     WHERE c.espera_resposta AND NOT c.grupo AND NOT c.sistema AND NOT c.excluido`,
   );
   const corte = Date.now() - horas * 3600_000;
-  return (r.rows as any[])
+  return r.rows
     .filter((x) => !x.de_mim && new Date(x.quando).getTime() < corte)
     .sort((a, b) => new Date(b.quando).getTime() - new Date(a.quando).getTime())
     .slice(0, limite)
-    .map(({ de_mim, ...x }) => x);
+    .map(({ de_mim: _, ...x }) => x);
+}
+
+/** O que a leitura da conversa concluiu: onde ela está, se espera o dono, se é robô. */
+export async function atualizarConversa(
+  db: Db,
+  jid: string,
+  c: { situacao: string; esperaResposta: boolean; sistema?: boolean },
+): Promise<void> {
+  await db.query(
+    `UPDATE contatos SET situacao = $2, espera_resposta = $3, sistema = sistema OR $4, atualizado_em = now() WHERE jid = $1`,
+    [jid, c.situacao.trim(), c.esperaResposta, c.sistema ?? false],
+  );
+}
+
+/** O dono respondeu: até a próxima leitura, ninguém ali espera por ele. */
+export async function donoRespondeu(db: Db, jid: string): Promise<void> {
+  await db.query("UPDATE contatos SET espera_resposta = FALSE WHERE jid = $1 AND espera_resposta", [jid]);
+}
+
+/** Nomes da agenda do celular. Só preenche: nome que o dono deu não é trocado. */
+export async function gravarNomesDaAgenda(db: Db, nomes: { jid: string; nome: string | null; push: string | null }[]): Promise<number> {
+  let n = 0;
+  for (const x of nomes) {
+    const jid = await resolverJid(db, x.jid);
+    const r = await db.query(
+      `UPDATE contatos SET nome = COALESCE(nome, $2), nome_push = COALESCE(nome_push, $3)
+       WHERE jid = $1 AND ((nome IS NULL AND $2::text IS NOT NULL) OR (nome_push IS NULL AND $3::text IS NOT NULL))`,
+      [jid, x.nome, x.push],
+    );
+    n += r.rowCount ?? 0;
+  }
+  return n;
+}
+
+export interface Fala {
+  autor: "dono" | "assistente";
+  texto: string;
+  refs: string;
+  criado_em: Date;
+}
+
+/** Uma mensagem do chat de controle, nos dois sentidos. `refs`: quem foi citado, com o jid. */
+export async function registrarFala(db: Db, autor: Fala["autor"], texto: string, refs = ""): Promise<void> {
+  await db.query("INSERT INTO dialogo (autor, texto, refs) VALUES ($1, $2, $3)", [autor, texto, refs]);
+}
+
+/** As últimas falas do chat de controle dentro de `horas`, da mais velha para a mais nova. */
+export async function dialogoRecente(db: Db, limite: number, horas = 24): Promise<Fala[]> {
+  const r = await db.query<Fala>(
+    `SELECT autor, texto, refs, criado_em FROM dialogo
+     WHERE criado_em > now() - make_interval(hours => $2) ORDER BY id DESC LIMIT $1`,
+    [limite, horas],
+  );
+  return r.rows.reverse();
 }
 
 export async function buscarMensagens(
@@ -328,7 +408,7 @@ export async function buscarMensagens(
 ): Promise<(Mensagem & { contato: string })[]> {
   const r = await db.query<Mensagem & { contato: string }>(
     `SELECT m.id, m.chat_jid, m.remetente_nome, m.de_mim, m.tipo, m.texto, m.enviada_em,
-            COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS contato
+            ${NOME_SQL} AS contato
      FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
      WHERE to_tsvector('portuguese', m.texto) @@ websearch_to_tsquery('portuguese', $1)
      ORDER BY m.enviada_em DESC LIMIT $2`,
@@ -443,6 +523,9 @@ export async function agendarEnvio(db: Db, id: number, quando: Date): Promise<bo
 export async function apagarAntigas(db: Db, dias: number): Promise<number> {
   const r = await db.query("DELETE FROM mensagens WHERE enviada_em < now() - make_interval(days => $1)", [dias]);
   await db.query("DELETE FROM enviadas WHERE criada_em < now() - interval '30 days'");
+  // O chat de controle vale como memória de curto prazo; o que importa dele vai para o caderno.
+  await db.query("DELETE FROM dialogo WHERE criado_em < now() - interval '14 days'");
+  await db.query("DELETE FROM consumo WHERE criado_em < now() - interval '180 days'");
   return r.rowCount ?? 0;
 }
 
@@ -478,7 +561,7 @@ export async function contatosParaConhecer(db: Db, limite: number, minimoMensage
   const r = await db.query<{ jid: string }>(
     `SELECT c.jid FROM contatos c
      JOIN mensagens m ON m.chat_jid = c.jid
-     WHERE NOT c.excluido AND (c.ficha_em IS NULL OR m.enviada_em > c.ficha_em)
+     WHERE NOT c.excluido AND NOT c.sistema AND (c.ficha_em IS NULL OR m.enviada_em > c.ficha_em)
      GROUP BY c.jid
      HAVING count(*) >= $2
      ORDER BY count(*) DESC LIMIT $1`,
@@ -542,6 +625,8 @@ export function fichaEmTexto(c: Contato): string {
     c.resumo ? `Quem é: ${c.resumo}` : "",
     c.tom ? `Como o dono fala com essa pessoa: ${c.tom}` : "",
     c.assuntos_abertos ? `Assuntos em aberto: ${c.assuntos_abertos}` : "",
+    c.sistema ? "É um sistema automático (notificações), não uma pessoa." : "",
+    c.situacao ? `Onde a conversa está: ${c.situacao}` : "",
     c.aguardando ? `O dono está esperando dela: ${c.aguardando}` : "",
     c.memoria ? `Fatos:\n${c.memoria}` : "",
   ]
@@ -602,7 +687,7 @@ export async function datasProximas(
   dias: number,
 ): Promise<{ jid: string; nome: string; descricao: string; mes: number; dia: number; faltam: number }[]> {
   const r = await db.query<{ jid: string; nome: string; descricao: string; mes: number; dia: number }>(
-    `SELECT d.chat_jid AS jid, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome, d.descricao, d.mes, d.dia
+    `SELECT d.chat_jid AS jid, ${NOME_SQL} AS nome, d.descricao, d.mes, d.dia
      FROM datas d JOIN contatos c ON c.jid = d.chat_jid WHERE NOT c.excluido`,
   );
   const base = Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia);
@@ -635,7 +720,7 @@ export async function definirAutonomia(db: Db, jid: string, nivel: number | null
 /** Taxa de acerto: rascunhos decididos, e quantos saíram sem ajuste. */
 export async function acertos(db: Db, jid?: string): Promise<{ jid: string; nome: string; decididos: number; sem_ajuste: number; autonomia: number | null }[]> {
   const r = await db.query(
-    `SELECT r.chat_jid AS jid, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome, c.autonomia,
+    `SELECT r.chat_jid AS jid, ${NOME_SQL} AS nome, c.autonomia,
             count(*)::int AS decididos,
             count(*) FILTER (WHERE r.status = 'enviado' AND NOT r.ajustado)::int AS sem_ajuste
      FROM rascunhos r JOIN contatos c ON c.jid = r.chat_jid

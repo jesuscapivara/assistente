@@ -8,9 +8,19 @@
  * APIs Google Calendar e Gmail ativadas. O token impresso vai para o .env da VM.
  */
 import http from "node:http";
+import fs from "node:fs";
 
-const clientId = process.env.GOOGLE_CLIENT_ID;
-const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+let clientId = process.env.GOOGLE_CLIENT_ID;
+let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+if (!clientId || !clientSecret) {
+  try {
+    const env = fs.readFileSync(".env", "utf8");
+    const mId = env.match(/GOOGLE_CLIENT_ID=([^\r\n]+)/);
+    const mSec = env.match(/GOOGLE_CLIENT_SECRET=([^\r\n]+)/);
+    if (mId) clientId = mId[1].trim();
+    if (mSec) clientSecret = mSec[1].trim();
+  } catch {}
+}
 if (!clientId || !clientSecret) {
   console.error("Defina GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET.");
   process.exit(1);

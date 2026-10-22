@@ -177,12 +177,24 @@ const texto = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : un
  * conversas com as mensagens de cada uma. Devolve as mensagens no mesmo formato do
  * webhook, e os nomes que vierem junto (`pushnames`).
  */
-export function lerHistorico(payload: unknown): { mensagens: MensagemRecebida[]; nomes: Map<string, string> } {
+export function lerHistorico(payload: unknown): {
+  mensagens: MensagemRecebida[];
+  nomes: Map<string, string>;
+  /** Pares LID ↔ número que o WhatsApp manda junto: juntam as conversas e dão nome ao LID. */
+  pares: { lid: string; numero: string }[];
+} {
   const mensagens: MensagemRecebida[] = [];
   const nomes = new Map<string, string>();
-  if (!isObj(payload) || tipoDoEvento(payload) !== "HistorySync") return { mensagens, nomes };
+  const pares: { lid: string; numero: string }[] = [];
+  if (!isObj(payload) || tipoDoEvento(payload) !== "HistorySync") return { mensagens, nomes, pares };
   const data = obj(payload, "data") ?? payload;
   const raiz = (campo(data, "Data") as Obj | undefined) ?? data;
+
+  for (const p of (campo(raiz, "phoneNumberToLidMappings") as unknown[]) ?? []) {
+    const numero = texto(campo(p, "pnJid"));
+    const lid = texto(campo(p, "lidJid"));
+    if (numero && lid) pares.push({ lid: lid.includes("@") ? lid : `${lid}@lid`, numero: numero.includes("@") ? numero : `${numero}@s.whatsapp.net` });
+  }
 
   for (const p of (campo(raiz, "pushnames") as unknown[]) ?? []) {
     const jid = texto(campo(p, "id"));
@@ -223,5 +235,5 @@ export function lerHistorico(payload: unknown): { mensagens: MensagemRecebida[];
       });
     }
   }
-  return { mensagens, nomes };
+  return { mensagens, nomes, pares };
 }

@@ -69,6 +69,8 @@ export async function briefings(deps: DepsProativo, antecedenciaMin: number, ago
           sistema: `Você prepara ${deps.dono} para uma reunião daqui a pouco, no WhatsApp. Curto: quem é, onde a conversa parou, o que ele prometeu, o que está pendente e um ponto de atenção. *Negrito* nos nomes. Só o que está nos dados.`,
           conteudo: `Agora: ${agoraPorExtenso(agora, deps.fuso)}\nREUNIÃO: ${eventoEmTexto(e, deps.fuso)}\n${e.descricao ? `Descrição: ${e.descricao}\n` : ""}\n${blocos.join("\n\n")}`,
           esforco: "low",
+          peso: "leve",
+          funcao: "briefing",
         })
         .catch(() => "");
     }
@@ -112,10 +114,10 @@ const SUMICO_DIAS: Record<string, number> = { cliente: 21, familia: 14, amigo: 3
 /** Pessoas importantes com quem o dono costumava falar e parou. */
 export async function radar(db: Db): Promise<{ nome: string; relacao: string; dias: number }[]> {
   const r = await db.query<{ nome: string; relacao: string; ultima: Date; total: number }>(
-    `SELECT COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome, c.relacao,
+    `SELECT ${repo.NOME_SQL} AS nome, c.relacao,
             max(m.enviada_em) AS ultima, count(*)::int AS total
      FROM contatos c JOIN mensagens m ON m.chat_jid = c.jid
-     WHERE NOT c.excluido AND NOT c.grupo AND c.relacao IN ('cliente', 'familia', 'amigo')
+     WHERE NOT c.excluido AND NOT c.grupo AND NOT c.sistema AND c.relacao IN ('cliente', 'familia', 'amigo')
      GROUP BY c.jid, c.nome, c.nome_push, c.relacao
      HAVING count(*) >= 10`,
   );
@@ -153,7 +155,7 @@ export async function revisaoSemanal(deps: DepsProativo, agora = new Date()): Pr
     `Compromissos cumpridos na semana: ${feitos.rows[0].n}`,
     `Respostas enviadas pelo assistente: ${enviados.rows[0].n}`,
     atrasados.length ? `Atrasados:\n${atrasados.map((k) => `#${k.id} ${k.descricao} (${k.contato_nome ?? "?"})`).join("\n")}` : "",
-    esperando.length ? `Esperando resposta dele há mais de 1 dia:\n${esperando.map((e) => `${e.nome}: "${e.ultima.slice(0, 80)}"`).join("\n")}` : "",
+    esperando.length ? `Esperando resposta dele há mais de 1 dia:\n${esperando.map((e) => `${e.nome}: ${e.situacao || `"${e.ultima.slice(0, 80)}"`}`).join("\n")}` : "",
     sumidos.length ? `Faz tempo que não fala com:\n${sumidos.map((x) => `${x.nome} (${x.relacao}, ${x.dias} dias)`).join("\n")}` : "",
     datas.length ? `Datas da semana:\n${datas.map((x) => `${String(x.dia).padStart(2, "0")}/${String(x.mes).padStart(2, "0")} ${x.descricao} — ${x.nome}`).join("\n")}` : "",
     proxima ? `Agenda da próxima semana:\n${proxima}` : "",
@@ -166,6 +168,8 @@ export async function revisaoSemanal(deps: DepsProativo, agora = new Date()): Pr
       sistema: `Você faz a revisão semanal de ${deps.dono} no WhatsApp, domingo à tarde. Curta e útil: o que travou, o que pede atenção na semana que vem, quem ele deveria procurar. *Negrito* nos títulos. Mantenha os #N. Só o que está nos dados.`,
       conteudo: `Agora: ${agoraPorExtenso(agora, deps.fuso)}\n\n${dados}`,
       esforco: "low",
+      peso: "leve",
+      funcao: "revisao_semanal",
     })
     .catch(() => "");
   await deps.avisar(`🗓️ *Revisão da semana*\n\n${texto || dados}`);

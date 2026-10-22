@@ -7,6 +7,8 @@ import { agoraPorExtenso, dataCurta, linhas } from "./formato.js";
 import type { Google } from "./google.js";
 import type { Ia } from "./ia.js";
 import { escreverRascunho, previa, proporResposta } from "./rascunho.js";
+import { relatorioDeCusto } from "./consumo.js";
+import { atualizarCaderno, contextoDoChat, lerCaderno, limparCaderno } from "./memoria.js";
 import * as repo from "./repo.js";
 import { montarResumo } from "./resumo.js";
 import type { Evolution } from "./whatsapp/evolution.js";
@@ -17,7 +19,10 @@ export interface DepsControle {
   evolution: Evolution;
   dono: string;
   fuso: string;
-  avisar(texto: string): Promise<void>;
+  /** `refs`: quem foi citado na mensagem (nome = jid), guardado só no diálogo. */
+  avisar(texto: string, refs?: string): Promise<void>;
+  /** O resumo como imagem; sem isto, sai em texto. */
+  enviarResumo?(): Promise<void>;
   /** Agenda e Gmail, quando configurados. */
   google?: Google;
   expediente?: { inicioH: number; fimH: number };
@@ -55,6 +60,8 @@ export type Comando =
   | { tipo: "autonomia"; nome?: string; nivel?: number }
   | { tipo: "pausa" }
   | { tipo: "retoma" }
+  | { tipo: "custo" }
+  | { tipo: "caderno"; limpar: boolean }
   | { tipo: "ajuda" }
   | { tipo: "pedido"; texto: string };
 
@@ -86,6 +93,9 @@ export function lerComando(texto: string): Comando {
   if ((m = t.match(/^autonomia\s+(.+?)\s+([0-3])$/i))) return { tipo: "autonomia", nome: m[1].trim(), nivel: Number(m[2]) };
   if (/^(pausa|pausar|para tudo)[.!]?$/i.test(t)) return { tipo: "pausa" };
   if (/^(retoma|retomar|volta a responder)[.!]?$/i.test(t)) return { tipo: "retoma" };
+  if (/^(custo|gasto|consumo)[.!?]?$/i.test(t)) return { tipo: "custo" };
+  if (/^caderno[.!?]?$/i.test(t)) return { tipo: "caderno", limpar: false };
+  if (/^(esquece|limpa)\s+(o\s+)?caderno[.!]?$/i.test(t)) return { tipo: "caderno", limpar: true };
   if (/^(ajuda|help|\?)$/i.test(t)) return { tipo: "ajuda" };
   return { tipo: "pedido", texto: t };
 }
@@ -107,6 +117,8 @@ const AJUDA = `*Comandos*
 • autonomia <nome> <0-3> — 0 só quando você pede · 1 propõe resposta · 2 envia se você não vetar · 3 envia o simples direto
 • veta N — não envia o rascunho N
 • pausa · retoma — desliga e religa todo envio automático
+• custo — quanto o assistente gastou com o Claude (hoje, 7 e 30 dias)
+• caderno — o que estou acompanhando entre nós · esquece caderno — zera
 • áudio também vale: fale o pedido
 Fora isso, é só pedir: "o que eu combinei com a Fernanda?", "responde o João dizendo que amanhã não dá".`;
 
@@ -156,8 +168,21 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
     case "excluir":
     case "incluir":
       return alternarChat(deps, c.nome, c.tipo === "excluir");
-    case "resumo":
-      return deps.avisar(await montarResumo(deps));
+    case "resumo": {
+      if (deps.enviarResumo) return deps.enviarResumo();
+      const r = await montarResumo(deps);
+      return deps.avisar(r.texto, r.refs);
+    }
+    case "custo":
+      return deps.avisar(await relatorioDeCusto(deps.db));
+    case "caderno": {
+      if (c.limpar) {
+        await limparCaderno(deps.db);
+        return deps.avisar("Caderno zerado. Suas regras e o seu perfil continuam.");
+      }
+      const caderno = await lerCaderno(deps.db);
+      return deps.avisar(caderno ? `*O que estou acompanhando*\n${caderno}` : "O caderno está vazio.");
+    }
     case "perfil":
       return deps.avisar(await mostrarPerfil(deps));
     case "regra": {
@@ -266,7 +291,7 @@ export async function executarEnvio(
 async function levarParaAgenda(deps: DepsControle, id: number): Promise<string> {
   if (!deps.google || !deps.sincronizarAgenda) return "";
   const r = await deps.db.query<{ descricao: string; quando: Date | null; responsavel: string; evento_id: string | null; contato: string }>(
-    `SELECT k.descricao, k.quando, k.responsavel, k.evento_id, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS contato
+    `SELECT k.descricao, k.quando, k.responsavel, k.evento_id, ${repo.NOME_SQL} AS contato
      FROM compromissos k JOIN contatos c ON c.jid = k.chat_jid WHERE k.id = $1`,
     [id],
   );
@@ -323,7 +348,7 @@ async function relatorioAutonomia(deps: DepsControle): Promise<string> {
   const padrao = deps.autonomiaPadrao ?? 0;
   const linhasAcerto = await repo.acertos(deps.db);
   const comNivel = await deps.db.query<{ nome: string; autonomia: number }>(
-    `SELECT COALESCE(nome, nome_push, split_part(jid, '@', 1)) AS nome, autonomia FROM contatos
+    `SELECT ${repo.nomeSql('')} AS nome, autonomia FROM contatos
      WHERE autonomia IS NOT NULL AND NOT excluido ORDER BY autonomia DESC, nome`,
   );
   const partes = [
@@ -368,6 +393,8 @@ function sistemaAgente(dono: string, perfil: string, extras: string[]): string {
 - Para falar de alguém, ache o contato com buscar_contato e leia a conversa antes de responder. Diga de onde tirou a informação (data da mensagem).
 - Você nunca envia mensagem a ninguém. Para responder um contato, use propor_resposta: ele recebe o rascunho e decide.
 - Se ele disser como prefere as coisas ("nunca marco antes das 9", "com cliente sempre formal"), guarde com registrar_regra.
+- Mensagem curta ("sim", "pode", "esse", "o segundo", "faz isso") responde ao que está na CONVERSA RECENTE e no CADERNO: resolva por eles e aja. Só pergunte se de fato houver duas leituras.
+- Contato sem nome: diga quem é pelo que a ficha e a conversa mostram ("o cliente da obra do Largo"), nunca só o número.
 - Se não achar a informação, diga que não achou. Não invente.${extras.map((e) => `\n- ${e}`).join("")}${perfil ? `\n\nPERFIL DE ${dono.toUpperCase()}:\n${perfil}` : ""}`;
 }
 
@@ -379,21 +406,35 @@ async function atenderPedido(deps: DepsControle, texto: string): Promise<void> {
   if (deps.google) {
     ferramentas.push(...ferramentasGoogle({ google: deps.google, fuso: deps.fuso, expediente: deps.expediente ?? { inicioH: 9, fimH: 18 } }));
     extras.push(
-      "Você vê a agenda e o Gmail dele. Para marcar algo, veja horários livres antes e crie o evento só quando ele pedir. E-mail você só deixa em rascunho no Gmail.",
+      "Você vê a agenda e o Gmail dele. Para marcar algo, veja horários livres antes e crie o evento só quando ele pedir (se ele pedir reunião online/remota ou Meet, passe gerar_meet: true para gerar o link do Google Meet). E-mail você só deixa em rascunho no Gmail.",
     );
   }
-  if (deps.koreos) {
+  const contexto = await contextoDoChat(deps.db, deps.dono, deps.fuso, texto);
+  // As ferramentas do KoreOS são dezenas de definições a cada volta do agente: só vão
+  // quando o pedido (ou a conversa que ele continua) é sobre o escritório.
+  const koreos = deps.koreos && precisaDoKoreos(`${texto}\n${contexto.slice(-1500)}`) ? deps.koreos : undefined;
+  if (koreos) {
     extras.push(
       "Você tem o KoreOS dele (gestão do escritório: projetos, tarefas, clientes, financeiro, pranchas). Consulte à vontade; antes de criar, alterar ou excluir algo lá, confirme com ele.",
     );
   }
   const resposta = await deps.ia.agente({
+    funcao: koreos ? "agente+koreos" : "agente",
     sistema: sistemaAgente(deps.dono, perfil, extras),
-    conteudo: `Agora: ${agoraPorExtenso(new Date(), deps.fuso)}\n\n${texto}`,
+    conteudo: [`Agora: ${agoraPorExtenso(new Date(), deps.fuso)}`, contexto, `PEDIDO AGORA:\n${texto}`].filter(Boolean).join("\n\n"),
     ferramentas,
-    mcp: deps.koreos ? { nome: "koreos", ...deps.koreos } : undefined,
+    mcp: koreos ? { nome: "koreos", ...koreos } : undefined,
   });
   await deps.avisar(resposta || "Não consegui concluir isso. Tente pedir de outro jeito ou em partes.");
+  // Depois de responder: o dono não espera por isto.
+  void atualizarCaderno(deps).catch(() => undefined);
+}
+
+const ASSUNTO_KOREOS =
+  /kore|projeto|tarefa|cliente|financeir|pagamento|receb|despesa|fatura|boleto|prancha|proposta|or[çc]amento|obra|cronograma|prazo|equipe|apropria|horas/i;
+
+export function precisaDoKoreos(texto: string): boolean {
+  return ASSUNTO_KOREOS.test(texto);
 }
 
 /**

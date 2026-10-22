@@ -64,6 +64,8 @@ Baixo risco: confirmar recebimento, horário já combinado, agradecer, cumprimen
 Alto risco: qualquer compromisso novo, dinheiro, prazo, opinião técnica, negociação, reclamação, assunto pessoal ou delicado, ou se o rascunho pode estar errado sobre algo. Na dúvida, alto.`,
       conteudo: `CONVERSA:\n${conversa}\n\nRESPOSTA PROPOSTA:\n${texto}`,
       esforco: "low",
+      // Decide se algo sai sem o dono olhar: fica no modelo principal, não no leve.
+      funcao: "risco",
     })
     .catch(() => null);
   return r ?? { risco: "alto", motivo: "não consegui avaliar" };

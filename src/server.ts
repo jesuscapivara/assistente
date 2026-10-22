@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
+import { lerImagem } from "./midia.js";
 
 function tokenConfere(recebido: string, esperado: string): boolean {
   const a = Buffer.from(recebido);
@@ -8,7 +9,7 @@ function tokenConfere(recebido: string, esperado: string): boolean {
 }
 
 export function ocultarToken(url: string): string {
-  return url.replace(/^\/(webhook|painel)\/[^/?#]+/, "/$1/***");
+  return url.replace(/^\/(webhook|painel|midia)\/[^/?#]+/, "/$1/***");
 }
 
 export interface OpcoesPainel {
@@ -44,6 +45,13 @@ export function criarServidor(opts: {
   });
 
   app.get("/saude", async () => ({ ok: true }));
+
+  // O cartão do resumo, buscado pela Evolution na hora do envio (ver midia.ts).
+  app.get<{ Params: { id: string } }>("/midia/:id", async (req, reply) => {
+    const png = lerImagem(req.params.id.replace(/\.png$/, ""));
+    if (!png) return reply.code(404).send();
+    return reply.header("Cache-Control", "no-store").type("image/png").send(png);
+  });
 
   app.post<{ Params: { token: string } }>("/webhook/:token", async (req, reply) => {
     if (!tokenConfere(req.params.token, opts.webhookToken)) return reply.code(401).send({ error: "unauthorized" });

@@ -13,7 +13,7 @@ import { ingerir } from "../src/ingestao.js";
 import { paginaDoPainel } from "../src/painel.js";
 import { briefings, cobrancas, fimDoDia, radar, revisaoSemanal } from "../src/proativo.js";
 import * as repo from "../src/repo.js";
-import { dadosDoResumo } from "../src/resumo.js";
+import { montarResumo } from "../src/resumo.js";
 import { criarServidor } from "../src/server.js";
 import type { Evolution } from "../src/whatsapp/evolution.js";
 
@@ -45,7 +45,7 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
   };
 }
 
-const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null };
+const vazio: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false };
 
 class IaFalsa implements Ia {
   extracao: Extracao = vazio;
@@ -73,6 +73,13 @@ class WhatsFalso implements Evolution {
   async enviarTexto(destino: string, texto: string) {
     this.enviadas.push({ destino, texto });
     return `W${this.enviadas.length}`;
+  }
+  async enviarImagem(destino: string, url: string, legenda: string) {
+    this.enviadas.push({ destino, texto: `[imagem ${url}] ${legenda}` });
+    return `I${this.enviadas.length}`;
+  }
+  async contatos() {
+    return [];
   }
   async baixarMidia() {
     return { buffer: Buffer.from(""), mimetype: "audio/ogg" };
@@ -123,7 +130,7 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
 
   beforeEach(async () => {
     await db.query(
-      "TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado, apelidos, perfil, datas, alertas RESTART IDENTITY CASCADE",
+      "TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado, apelidos, perfil, datas, alertas, dialogo, consumo RESTART IDENTITY CASCADE",
     );
     ia = new IaFalsa();
     whats = new WhatsFalso();
@@ -408,7 +415,7 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     const amanha = new Date(hoje.getTime() + 86400_000);
     const p = new Intl.DateTimeFormat("en-CA", { timeZone: SP, month: "numeric", day: "numeric" }).formatToParts(amanha);
     await repo.gravarDatas(db, FERNANDA, [{ descricao: "aniversário", mes: Number(p.find((x) => x.type === "month")!.value), dia: Number(p.find((x) => x.type === "day")!.value) }]);
-    expect(await dadosDoResumo(deps, hoje)).toMatch(/🎂 amanhã: aniversário — Fernanda/);
+    expect((await montarResumo(deps, hoje)).texto).toMatch(/🎂 amanhã: aniversário — Fernanda/);
 
     // Cliente que sumiu há 30 dias, com histórico de conversa.
     await repo.atualizarFicha(db, JOAO, { relacao: "cliente" });

@@ -22,7 +22,7 @@ export async function paginaDoPainel(db: Db, base: string, opts: { fuso: string;
   const rascunhos = (
     await db.query<{ id: number; chat_jid: string; texto: string; enviar_em: Date | null; risco: string | null; motivo_risco: string; nome: string }>(
       `SELECT r.id, r.chat_jid, r.texto, r.enviar_em, r.risco, r.motivo_risco,
-              COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS nome
+              ${repo.NOME_SQL} AS nome
        FROM rascunhos r JOIN contatos c ON c.jid = r.chat_jid WHERE r.status = 'aguardando' ORDER BY r.id DESC`,
     )
   ).rows;

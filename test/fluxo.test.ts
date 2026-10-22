@@ -6,18 +6,19 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { tique } from "../src/agenda.js";
 import { aprenderComCorrecoes, conhecerContato } from "../src/conhecer.js";
 import { criarFerramentas, tratarComando, type DepsControle } from "../src/controle.js";
-import { abrirDb, migrar, type Db } from "../src/db.js";
+import { abrirDb, gravarEstado, migrar, type Db } from "../src/db.js";
 import { extrairChat } from "../src/extracao.js";
 import type { EntradaExtracao, Extracao, Ia } from "../src/ia.js";
 import { ingerir, ingerirHistorico } from "../src/ingestao.js";
 import * as repo from "../src/repo.js";
-import { dadosDoResumo } from "../src/resumo.js";
+import { montarResumo } from "../src/resumo.js";
 import type { Evolution } from "../src/whatsapp/evolution.js";
 
 const URL_TESTE = process.env.DATABASE_URL_TESTE;
 const DONO = "5551900000000@s.whatsapp.net";
 const FERNANDA = "5551911111111@s.whatsapp.net";
 const GRUPO = "120363000000@g.us";
+const JOAO = "5551922222222@s.whatsapp.net";
 
 let db: Db;
 let seq = 0;
@@ -43,7 +44,7 @@ function msg(chat: string, texto: string, o: { deMim?: boolean; nome?: string; q
 
 class IaFalsa implements Ia {
   extracoes: EntradaExtracao[] = [];
-  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null };
+  resposta: Extracao = { compromissos: [], fatos: [], precisa_resposta: false, urgente: false, motivo_urgencia: "", aguardando: null, situacao: "", automatica: false };
   textos: string[] = [];
   sistemas: string[] = [];
   estruturados: unknown[] = [];
@@ -61,7 +62,9 @@ class IaFalsa implements Ia {
     this.sistemas.push(p.sistema);
     return "Oi Fê! Amanhã te mando o orçamento.";
   }
-  async agente() {
+  agentes: string[] = [];
+  async agente(p: { conteudo: string }) {
+    this.agentes.push(p.conteudo);
     return "resposta do agente";
   }
 }
@@ -73,6 +76,13 @@ class WhatsFalso implements Evolution {
     if (this.falhar) throw new Error("engine fora");
     this.enviadas.push({ destino, texto });
     return `E${this.enviadas.length}`;
+  }
+  async enviarImagem(destino: string, url: string, legenda: string) {
+    this.enviadas.push({ destino, texto: `[imagem ${url}] ${legenda}` });
+    return `I${this.enviadas.length}`;
+  }
+  async contatos() {
+    return [];
   }
   async baixarMidia() {
     return { buffer: Buffer.from(""), mimetype: "audio/ogg" };
@@ -103,7 +113,7 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
   afterAll(async () => db?.end());
 
   beforeEach(async () => {
-    await db.query("TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado, apelidos, perfil RESTART IDENTITY CASCADE");
+    await db.query("TRUNCATE contatos, mensagens, compromissos, rascunhos, enviadas, estado, apelidos, perfil, dialogo, consumo RESTART IDENTITY CASCADE");
     ia = new IaFalsa();
     whats = new WhatsFalso();
     avisos = [];
@@ -155,6 +165,8 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
       urgente: false,
       motivo_urgencia: "",
       aguardando: null,
+      situacao: "Ela pediu o orçamento até amanhã.",
+      automatica: false,
     };
 
     await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
@@ -175,10 +187,56 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     await ing(msg(FERNANDA, "E aí, conseguiu ver?", { quando: new Date(Date.now() - 6 * 3600_000).toISOString() }));
     await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "ligar para a marmoraria", quando: new Date(Date.now() + 3600_000), responsavel: "eu" });
     await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "mandar fotos da obra", quando: null, responsavel: "eu" });
-    const texto = await dadosDoResumo(deps);
-    expect(texto).toMatch(/Agenda[\s\S]*ligar para a marmoraria/);
+    // Quem espera é quem a leitura da conversa disse que espera, com a situação junto.
+    await repo.atualizarConversa(db, FERNANDA, { situacao: "Ela perguntou se você viu o orçamento.", esperaResposta: true });
+    const { texto, refs } = await montarResumo(deps);
+    expect(texto).toMatch(/Compromissos[\s\S]*ligar para a marmoraria/);
     expect(texto).toMatch(/Promessas sem data[\s\S]*mandar fotos da obra/);
-    expect(texto).toMatch(/Esperando resposta sua[\s\S]*Fernanda/);
+    expect(texto).toMatch(/Esperando resposta sua[\s\S]*Fernanda[\s\S]*perguntou se você viu o orçamento/);
+    expect(refs).toMatch(new RegExp(`Fernanda = ${FERNANDA}`));
+
+    // Respondeu pelo celular: sai da lista na hora.
+    await ing(msg(FERNANDA, "vi sim, te mando hoje", { deMim: true }));
+    expect((await montarResumo(deps)).texto).not.toMatch(/Esperando resposta sua/);
+  });
+
+  it("'tá ok' e figurinha não chamam o Claude e encerram a espera", async () => {
+    await ing(msg(FERNANDA, "Pode ser sábado?", { quando: new Date(Date.now() - 600_000).toISOString() }));
+    ia.resposta = { ...ia.resposta, precisa_resposta: true, situacao: "Ela perguntou se pode ser sábado." };
+    await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
+    expect((await repo.lerContato(db, FERNANDA))?.espera_resposta).toBe(true);
+
+    await ing(msg(FERNANDA, "Tá ok 👍", { quando: new Date(Date.now() - 300_000).toISOString() }));
+    await extrairChat({ ...deps, quietoMin: 0 }, FERNANDA);
+    expect(ia.extracoes).toHaveLength(1);
+    expect((await repo.lerContato(db, FERNANDA))?.espera_resposta).toBe(false);
+  });
+
+  it("grupo só é lido quando envolve o dono; robô não espera resposta", async () => {
+    await ing(msg(GRUPO, "alguém viu a chave do carro?", { grupo: true, quando: new Date(Date.now() - 600_000).toISOString() }));
+    await extrairChat({ ...deps, quietoMin: 0, mencoes: ["Lucas"] }, GRUPO);
+    expect(ia.extracoes).toHaveLength(0);
+    await ing(msg(GRUPO, "Lucas, consegue amanhã?", { grupo: true, quando: new Date(Date.now() - 500_000).toISOString() }));
+    await extrairChat({ ...deps, quietoMin: 0, mencoes: ["Lucas"] }, GRUPO);
+    expect(ia.extracoes).toHaveLength(1);
+
+    await ing(msg(JOAO, "Seu código de acesso é 123. Confirma?", { quando: new Date(Date.now() - 600_000).toISOString() }));
+    ia.resposta = { ...ia.resposta, precisa_resposta: true, automatica: true, situacao: "" };
+    await extrairChat({ ...deps, quietoMin: 0 }, JOAO);
+    expect(await repo.lerContato(db, JOAO)).toMatchObject({ sistema: true, espera_resposta: false });
+  });
+
+  it("o pedido livre leva o diálogo recente e o caderno", async () => {
+    await repo.registrarFala(db, "assistente", "Posso refazer o resumo com os nomes. Quer?");
+    await gravarEstado(db, "caderno", "- propus refazer o resumo com nomes");
+    await repo.registrarFala(db, "dono", "Sim");
+    await tratarComando(deps, "Sim");
+    const conteudo = ia.agentes[0];
+    expect(conteudo).toMatch(/CADERNO[\s\S]*propus refazer o resumo/);
+    expect(conteudo).toMatch(/CONVERSA RECENTE[\s\S]*Posso refazer o resumo com os nomes/);
+    // O "Sim" de agora vai como pedido, não repetido no diálogo.
+    expect(conteudo.match(/Lucas: Sim/g) ?? []).toHaveLength(0);
+    expect(conteudo).toMatch(/PEDIDO AGORA:\nSim$/);
   });
 
   it("rascunho: sai só com ok, uma vez, e volta para aguardando se o envio falhar", async () => {

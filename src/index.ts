@@ -1,17 +1,20 @@
 import { iniciarAgenda, type TarefaDiaria } from "./agenda.js";
 import { enviarAgendados, responderSozinho } from "./autonomia.js";
-import { expediente, googleLigado, jidsDoDono, lerConfig } from "./config.js";
+import { desenharCartao, planoDoCartao } from "./cartao.js";
+import { expediente, googleLigado, jidsDoDono, lerConfig, urlInterna } from "./config.js";
 import { estudar } from "./conhecer.js";
+import { registrarUso } from "./consumo.js";
 import { NIVEIS, tratarComando, type DepsControle } from "./controle.js";
 import { abrirDb, migrar } from "./db.js";
-import { rodadaDeExtracao } from "./extracao.js";
+import { lerSituacoesPendentes, rodadaDeExtracao } from "./extracao.js";
+import { guardarImagem } from "./midia.js";
 import { criarGoogle } from "./google.js";
 import { criarIa } from "./ia.js";
 import { ingerir } from "./ingestao.js";
 import { comandoDoPainel, paginaDoPainel } from "./painel.js";
 import { briefings, cobrancas, fimDoDia, revisaoSemanal } from "./proativo.js";
 import * as repo from "./repo.js";
-import { montarResumo } from "./resumo.js";
+import { coletarDia, resumoEmTexto } from "./resumo.js";
 import { criarServidor } from "./server.js";
 import { transcrever } from "./transcricao.js";
 import { criarEvolution } from "./whatsapp/evolution.js";
@@ -21,7 +24,13 @@ const db = abrirDb(cfg.DATABASE_URL);
 const aplicadas = await migrar(db);
 
 const evolution = criarEvolution(cfg.EVOLUTION_API_URL, cfg.EVOLUTION_INSTANCE_TOKEN);
-const ia = criarIa({ modelo: cfg.MODELO, modeloExtracao: cfg.MODELO_EXTRACAO, apiKey: cfg.ANTHROPIC_API_KEY });
+const ia = criarIa({
+  modelo: cfg.MODELO,
+  modeloExtracao: cfg.MODELO_EXTRACAO,
+  modeloLeve: cfg.MODELO_LEVE,
+  apiKey: cfg.ANTHROPIC_API_KEY,
+  aoUsar: (u) => registrarUso(db, u),
+});
 const google = googleLigado(cfg)
   ? criarGoogle({
       clientId: cfg.GOOGLE_CLIENT_ID!,
@@ -38,15 +47,57 @@ const donoJid = `${cfg.DONO_NUMERO}@s.whatsapp.net`;
  * para não se confundir com o que ele mesmo anota ali. O id fica guardado para o
  * webhook não tratar a própria resposta como comando.
  */
-async function avisar(texto: string): Promise<void> {
+async function avisar(texto: string, refs = ""): Promise<void> {
   const id = await evolution.enviarTexto(donoJid, `🤖 ${texto}`);
   await repo.registrarEnviada(db, id);
+  // O que o assistente disse é o contexto da próxima mensagem do dono ("sim", "o segundo").
+  await repo.registrarFala(db, "assistente", texto, refs).catch(() => undefined);
 }
 
 const log = (o: object, t: string) => app.log.warn(o, t);
 const base = { db, ia, dono: cfg.DONO_NOME, fuso: cfg.FUSO, avisar, google, log };
+
+/**
+ * O resumo da manhã: o cartão em imagem, com o essencial e os #N na legenda (é por eles
+ * que o dono responde). Sem imagem, ou se ela falhar, vai o texto.
+ */
+async function enviarResumo(): Promise<void> {
+  const dia = await coletarDia(base);
+  const { texto, refs } = resumoEmTexto(dia, cfg.DONO_NOME, cfg.FUSO);
+  if (cfg.RESUMO_IMAGEM) {
+    try {
+      const plano = await planoDoCartao(ia, dia, cfg.DONO_NOME, cfg.FUSO);
+      const png = await desenharCartao(dia, plano, cfg.FUSO);
+      const url = `${urlInterna(cfg)}/midia/${guardarImagem(png)}.png`;
+      const compromissos = [...dia.comData, ...dia.semData].map((c) => `#${c.id} ${c.descricao}`).slice(0, 8);
+      const legenda = `🤖 ${plano.manchete}${compromissos.length ? `\n\n${compromissos.join("\n")}\n_confirma N · feito N · ignora N_` : ""}`;
+      const id = await evolution.enviarImagem(donoJid, url, legenda.slice(0, 1000));
+      await repo.registrarEnviada(db, id);
+      // O que estava na imagem vai por extenso no diálogo: o agente não vê a figura.
+      const cartao = [
+        `[cartão do resumo] ${plano.manchete}`,
+        ...plano.atos.map((a) => `${a.faixa}: ${a.frase}`),
+        ...plano.precisa.map((p, i) => `Precisa de você ${i + 1}. ${p.titulo} — ${p.frase}`),
+        ...plano.resolvido.map((p, i) => `Resolvido ${i + 1}. ${p.frase}`),
+      ].join("\n");
+      await repo.registrarFala(db, "assistente", `${cartao}\n\n${texto}`, refs).catch(() => undefined);
+      return;
+    } catch (err) {
+      app.log.warn({ err: String(err) }, "cartão do resumo falhou; vai em texto");
+    }
+  }
+  await avisar(texto, refs);
+}
+
+/** Os nomes da agenda do celular, que o webhook não traz para quem nunca escreveu. */
+async function sincronizarNomes(): Promise<void> {
+  const n = await repo.gravarNomesDaAgenda(db, await evolution.contatos());
+  if (n) app.log.info({ n }, "nomes da agenda gravados");
+}
+
 const depsControle: DepsControle = {
   ...base,
+  enviarResumo,
   evolution,
   expediente: expediente(cfg),
   sincronizarAgenda: cfg.AGENDA_SINCRONIZAR,
@@ -63,6 +114,7 @@ const transcreverAudio = cfg.OPENAI_API_KEY
 async function comando(texto: string): Promise<void> {
   // Quem já tem o 🤖 é o próprio assistente (o id pode não ter vindo na resposta do envio).
   if (texto.startsWith("🤖")) return;
+  await repo.registrarFala(db, "dono", texto).catch(() => undefined);
   try {
     await tratarComando(depsControle, texto);
   } catch (err) {
@@ -129,10 +181,20 @@ const app = criarServidor({
     : undefined,
 });
 
+// Como o dono aparece citado num grupo: grupo que não o envolve não custa leitura.
+const mencoes = [cfg.DONO_NOME, cfg.DONO_NUMERO, ...cfg.DONO_LIDS.split(",").map((x) => x.trim().split("@")[0])].filter(Boolean);
+
 const diarias: TarefaDiaria[] = [
-  { chave: "resumo", hora: cfg.RESUMO_HORA, rodar: async () => avisar(await montarResumo(base)) },
+  { chave: "resumo", hora: cfg.RESUMO_HORA, rodar: enviarResumo },
   { chave: "limpeza", hora: "03:00", rodar: () => repo.apagarAntigas(db, cfg.RETENCAO_DIAS) },
-  { chave: "estudo", hora: "04:00", rodar: () => estudar(base) },
+  {
+    chave: "estudo",
+    hora: "04:00",
+    rodar: async () => {
+      await sincronizarNomes().catch((err) => log({ err: String(err) }, "agenda do celular falhou"));
+      return estudar(base);
+    },
+  },
   { chave: "cobrancas", hora: "10:00", rodar: () => cobrancas(base, cfg.COBRAR_APOS_DIAS) },
   { chave: "fim_do_dia", hora: "18:00", rodar: () => fimDoDia(base) },
   { chave: "revisao_semanal", hora: "18:30", diaDaSemana: 0, rodar: () => revisaoSemanal(base) },
@@ -148,6 +210,7 @@ const pararAgenda = iniciarAgenda({
       rodadaDeExtracao({
         ...base,
         quietoMin: cfg.EXTRACAO_QUIETO_MIN,
+        mencoes,
         aoPrecisarResposta: async (jid) => {
           await responderSozinho(depsAutonomia, jid);
         },
@@ -162,6 +225,14 @@ app.log.info(
   { migracoes: aplicadas, google: Boolean(google), koreos: Boolean(koreos), painel: Boolean(cfg.PAINEL_TOKEN) },
   "assistente no ar",
 );
+
+// Na subida, sem segurar nada: nomes da agenda e a situação das conversas que já
+// existiam antes desta leitura (uma vez por conversa; depois, a extração mantém).
+void (async () => {
+  await sincronizarNomes().catch((err) => log({ err: String(err) }, "agenda do celular falhou"));
+  const lidas = await lerSituacoesPendentes({ ...base, quietoMin: 0 });
+  if (lidas) app.log.info({ lidas }, "situação das conversas lida");
+})();
 
 for (const sinal of ["SIGINT", "SIGTERM"] as const) {
   process.on(sinal, async () => {

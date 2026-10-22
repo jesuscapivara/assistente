@@ -28,8 +28,22 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
 **É proativo**
 - ⚡ Urgência na hora (prazo para hoje, problema, cliente insatisfeito).
 - 📅 Briefing antes de cada reunião: quem é, onde a conversa parou, o que está combinado.
-- Resumo da manhã (07:30), o que ficou aberto do dia (18h), cobranças (10h) e a revisão da
-  semana com o radar de quem você não procura há tempo (domingo, 18h30).
+- ☀️ Resumo da manhã (07:30) **em imagem**: o dia desenhado como relevo (a altura é a carga de
+  reuniões), uma frase de abertura, três blocos de horário, o que precisa de você e o que já se
+  resolveu. Os `#N` dos compromissos vão na legenda. Sem imagem, ou se ela falhar, vai em texto.
+- O que ficou aberto do dia (18h), cobranças (10h) e a revisão da semana com o radar de quem
+  você não procura há tempo (domingo, 18h30).
+
+**Entende o contexto**
+- Cada conversa tem uma **situação** em uma frase, que junta a última mensagem ao que veio
+  antes ("você convidou a Ana para a obra; ela disse que sábado está livre — falta propor o
+  horário"). É ela que aparece no resumo, e não a frase solta.
+- "Esperando resposta" é quem de fato espera: "tá ok", "disponha" e emoji não entram, robô
+  (banco, notificação do KoreOS) não entra, e quem você respondeu pelo celular sai na hora.
+- O chat de controle tem memória: as últimas falas dos dois lados e um **caderno** curto do que
+  está em andamento entre vocês. Um "sim" responde ao que ele acabou de propor.
+- Contato sem nome aparece pelo que se sabe dele, nunca como número de LID. Os nomes da agenda
+  do celular vêm da Evolution na subida e toda madrugada.
 
 **Responde por você, até onde você deixar**
 
@@ -64,6 +78,8 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `perfil` · `regra nunca marco nada antes das 9` · `esquece 4` | o que ele sabe de você |
 | `estuda` | atualiza agora as fichas e o seu retrato |
 | `fora Grupo da Família` · `volta Grupo da Família` | tira (e apaga) ou devolve uma conversa |
+| `custo` | gasto com o Claude hoje, em 7 e em 30 dias, e por função |
+| `caderno` · `esquece caderno` | o que ele está acompanhando entre vocês; zera |
 | `resumo` · `ajuda` | |
 
 O **painel web** (opcional) mostra a mesma coisa numa tela: rascunhos para aprovar,
@@ -129,9 +145,26 @@ npm test                                   # testes de unidade
 DATABASE_URL_TESTE=postgres://... npm test # inclui os fluxos contra um Postgres vazio
 ```
 
-Modelos: `MODELO` (rascunho, perguntas, resumos) e `MODELO_EXTRACAO` (cada conversa nova), os
-dois `claude-opus-5-5`. A extração roda para toda conversa que se mexe: se o custo pesar com
-muitos grupos, troque só `MODELO_EXTRACAO`.
+### Custo
+
+Cada chamada ao Claude fica na tabela `consumo` (função, modelo, tokens), e o comando `custo`
+soma em dólares. Três modelos, por tipo de trabalho:
+
+| Variável | Padrão | Faz |
+|---|---|---|
+| `MODELO` | `claude-sonnet-5-5` | rascunho na sua voz, perguntas livres, retrato semanal, risco do envio automático |
+| `MODELO_EXTRACAO` | `claude-haiku-5-5` | leitura de cada conversa que se mexe |
+| `MODELO_LEVE` | `claude-haiku-5-5` | fichas, lições, briefing, cartão do resumo, caderno, revisão da semana |
+
+O que não chama modelo nenhum: o resumo em texto; mensagem sem conteúdo ("ok", "kkk",
+figurinha); grupo em que você não falou nem foi citado. As ferramentas do KoreOS só vão ao
+agente quando o pedido é sobre o escritório.
+
+Ficou de fora, de propósito, a API de lote (metade do preço) no estudo da madrugada: no Haiku,
+as 25 fichas da noite custam por volta de US$ 0,02, e o lote atrasaria as fichas em horas para
+economizar um centavo.
+
+Para ver o cartão sem banco nem Claude: `npx tsx scripts/cartao-exemplo.ts cartao.png`.
 
 ## Privacidade e segurança
 

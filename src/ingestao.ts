@@ -63,6 +63,8 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
   const texto = m.tipo === "audio" ? "[áudio]" : m.texto;
   const nova = await repo.gravarMensagem(deps.db, m, texto);
   if (!nova) return "repetido";
+  // Respondeu pelo celular: sai da lista de pendências na hora, sem esperar a leitura.
+  if (m.deMim) await repo.donoRespondeu(deps.db, chatJid);
 
   if (m.tipo === "audio" && deps.aoAudio) {
     void deps.aoAudio(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "transcrição falhou"));
@@ -75,7 +77,17 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
  * grava em lote, sem transcrever áudio antigo e sem extrair compromisso velho.
  */
 export async function ingerirHistorico(payload: unknown, deps: Pick<DepsIngestao, "db" | "jidsDoDono">): Promise<number> {
-  const { mensagens, nomes } = lerHistorico(payload);
+  const { mensagens, nomes, pares } = lerHistorico(payload);
+  // Primeiro os pares LID ↔ número: a conversa que chegou pelo LID já é gravada no
+  // número, e o nome que veio para um serve para o outro.
+  for (const p of pares) {
+    if (!deps.jidsDoDono.has(p.lid) && !deps.jidsDoDono.has(p.numero)) await repo.registrarApelido(deps.db, p.numero, p.lid);
+    const nome = nomes.get(p.lid) ?? nomes.get(p.numero);
+    if (nome) {
+      nomes.set(p.lid, nome);
+      nomes.set(p.numero, nome);
+    }
+  }
   let gravadas = 0;
   const excluidos = new Map<string, boolean>();
   for (const msg of mensagens) {
@@ -85,7 +97,7 @@ export async function ingerirHistorico(payload: unknown, deps: Pick<DepsIngestao
     if (excluido === undefined) {
       const c = await repo.garantirContato(deps.db, chatJid, {
         grupo: msg.grupo,
-        nomePush: msg.grupo ? null : (nomes.get(msg.chatJid) ?? null),
+        nomePush: msg.grupo ? null : (nomes.get(msg.chatJid) ?? nomes.get(chatJid) ?? null),
       });
       excluido = c.excluido;
       excluidos.set(chatJid, excluido);

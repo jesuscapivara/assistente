@@ -48,6 +48,8 @@ Para grupo: resumo = do que se trata e qual o papel de ${deps.dono} nele; tom = 
       .filter(Boolean)
       .join("\n\n"),
     esforco: "low",
+    peso: "leve",
+    funcao: "ficha",
   });
   if (!ficha) return false;
   await repo.atualizarFicha(deps.db, jid, ficha);
@@ -77,7 +79,7 @@ async function horasDeAtividade(deps: DepsConhecer): Promise<string> {
  */
 export async function estudarDono(deps: DepsConhecer): Promise<boolean> {
   const r = await deps.db.query<{ texto: string; relacao: string | null; contato: string; grupo: boolean }>(
-    `SELECT m.texto, c.relacao, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS contato, c.grupo
+    `SELECT m.texto, c.relacao, ${repo.NOME_SQL} AS contato, c.grupo
      FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
      WHERE m.de_mim AND m.tipo = 'texto' AND length(m.texto) > 2 AND NOT c.excluido AND ${repo.NAO_FOI_RASCUNHO}
      ORDER BY m.enviada_em DESC LIMIT 600`,
@@ -114,6 +116,8 @@ Nada de elogio nem de psicologia: é um manual prático de imitação.`,
       .filter(Boolean)
       .join("\n\n"),
     esforco: "medium",
+    // O retrato é o manual de imitação da voz do dono: uma vez por semana, no modelo principal.
+    funcao: "retrato",
   });
   if (!texto) return false;
   await repo.trocarPerfilGerado(deps.db, texto);
@@ -167,6 +171,8 @@ Só diferenças de JEITO de escrever (tom, tamanho, palavras, emoji, formalidade
           .filter(Boolean)
           .join("\n\n"),
         esforco: "low",
+        peso: "leve",
+        funcao: "licao",
       });
       for (const l of resp?.licoes ?? []) if (await repo.acrescentarPerfil(deps.db, "licao", l)) aprendidas++;
     }

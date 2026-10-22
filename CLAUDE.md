@@ -21,7 +21,15 @@ Leia o README antes (fluxo, comandos, instalação).
 - Integrações opcionais (Google, KoreOS MCP, áudio, painel): sem a chave, a função some; o
   resto funciona. Google e Evolution ficam atrás de interfaces (`Google`, `Evolution`) com
   versões falsas nos testes.
-- O Claude fica atrás da interface `Ia` (`src/ia.ts`). Modelos vêm de `MODELO` e `MODELO_EXTRACAO`.
+- O Claude fica atrás da interface `Ia` (`src/ia.ts`). Modelos vêm de `MODELO`, `MODELO_EXTRACAO`
+  e `MODELO_LEVE`. Toda chamada nova leva `funcao` (vira linha na tabela `consumo`) e, se for
+  ler, resumir ou classificar, `peso: "leve"`. Custo é requisito do Lucas: antes de chamar
+  modelo, veja se dá para resolver com dado ou regra (o resumo em texto não chama nenhum).
+- Memória do chat de controle: tudo que entra e sai dele passa por `registrarFala` (`dialogo`),
+  e o caderno (`src/memoria.ts`) guarda o que está em andamento. Pedido livre novo deve levar
+  `contextoDoChat`, senão um "sim" fica sem referência.
+- Nome de contato na tela ou em prompt: `nomeDe` / `NOME_SQL`, nunca o jid cru (o LID não é
+  telefone). "Esperando resposta" sai de `espera_resposta`, não de "a última mensagem é dele".
 - Teste: `npm run typecheck` (código e testes) e `npm test`; os fluxos com banco rodam com
   `DATABASE_URL_TESTE` apontando para um Postgres vazio (o teste apaga o schema).
 - Tokens no caminho (webhook, painel) não podem ir para o log: `ocultarToken` em `src/server.ts`.

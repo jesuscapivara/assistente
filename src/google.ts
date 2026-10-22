@@ -17,6 +17,7 @@ export interface Evento {
   local: string;
   descricao: string;
   convidados: { email: string; nome: string }[];
+  meetLink?: string | null;
 }
 
 export interface Email {
@@ -36,7 +37,7 @@ export interface Email {
 export interface Google {
   eventos(de: Date, ate: Date): Promise<Evento[]>;
   ocupado(de: Date, ate: Date): Promise<{ inicio: Date; fim: Date }[]>;
-  criarEvento(e: { titulo: string; inicio: Date; fim: Date; descricao?: string; local?: string }): Promise<string>;
+  criarEvento(e: { titulo: string; inicio: Date; fim: Date; descricao?: string; local?: string; meet?: boolean }): Promise<string>;
   emails(busca: string, max?: number): Promise<Email[]>;
   email(id: string): Promise<Email>;
   rascunhoEmail(r: { para: string; assunto: string; corpo: string; threadId?: string; emResposta?: string }): Promise<string>;
@@ -110,17 +111,27 @@ export function criarGoogle(
 
     async criarEvento(e) {
       // Sem convidados, de propósito: convite manda e-mail em nome do dono.
-      const j = await chamar<{ id: string }>(`${CAL}/calendars/primary/events?sendUpdates=none`, {
+      const url = `${CAL}/calendars/primary/events?sendUpdates=none${e.meet ? "&conferenceDataVersion=1" : ""}`;
+      const corpo: any = {
+        summary: e.titulo,
+        description: e.descricao ?? "",
+        location: e.local ?? "",
+        start: { dateTime: e.inicio.toISOString(), timeZone: cred.fuso },
+        end: { dateTime: e.fim.toISOString(), timeZone: cred.fuso },
+      };
+      if (e.meet) {
+        corpo.conferenceData = {
+          createRequest: {
+            requestId: `meet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            conferenceSolutionKey: { type: "hangoutsMeet" },
+          },
+        };
+      }
+      const j = await chamar<{ id: string; hangoutLink?: string }>(url, {
         method: "POST",
-        body: JSON.stringify({
-          summary: e.titulo,
-          description: e.descricao ?? "",
-          location: e.local ?? "",
-          start: { dateTime: e.inicio.toISOString(), timeZone: cred.fuso },
-          end: { dateTime: e.fim.toISOString(), timeZone: cred.fuso },
-        }),
+        body: JSON.stringify(corpo),
       });
-      return j.id;
+      return j.hangoutLink ? `${j.id}|${j.hangoutLink}` : j.id;
     },
 
     async emails(busca, max = 15) {
@@ -161,6 +172,7 @@ function lerEvento(e: any, fuso: string): Evento {
   const diaInteiro = Boolean(e.start?.date && !e.start?.dateTime);
   const inicio = e.start?.dateTime ? new Date(e.start.dateTime) : meiaNoiteEm(e.start?.date ?? "", fuso);
   const fim = e.end?.dateTime ? new Date(e.end.dateTime) : meiaNoiteEm(e.end?.date ?? "", fuso);
+  const meetLink = e.hangoutLink || e.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === "video")?.uri || null;
   return {
     id: e.id,
     titulo: e.summary ?? "(sem título)",
@@ -172,6 +184,7 @@ function lerEvento(e: any, fuso: string): Evento {
     convidados: (e.attendees ?? [])
       .filter((a: any) => !a.self)
       .map((a: any) => ({ email: a.email ?? "", nome: a.displayName ?? "" })),
+    meetLink,
   };
 }
 

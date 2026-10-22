@@ -12,7 +12,8 @@ export interface DepsGoogle {
 export function eventoEmTexto(e: Evento, fuso: string): string {
   const quando = e.diaInteiro ? `${dataCurta(e.inicio, fuso).slice(0, 5)} (dia todo)` : `${dataCurta(e.inicio, fuso)}–${dataCurta(e.fim, fuso).slice(6)}`;
   const quem = e.convidados.length ? ` · com ${e.convidados.map((c) => c.nome || c.email).join(", ")}` : "";
-  return `${quando} ${e.titulo}${e.local ? ` · ${e.local}` : ""}${quem}`;
+  const meet = e.meetLink ? ` · Meet: ${e.meetLink}` : "";
+  return `${quando} ${e.titulo}${e.local ? ` · ${e.local}` : ""}${meet}${quem}`;
 }
 
 const data = (s: string) => {
@@ -56,21 +57,23 @@ export function ferramentasGoogle({ google, fuso, expediente }: DepsGoogle) {
     betaZodTool({
       name: "criar_evento",
       description:
-        "Cria um evento na agenda do dono, sem convidados (não manda convite a ninguém). Use quando ele pedir para marcar ou anotar algo na agenda.",
+        "Cria um evento na agenda do dono, sem convidados (não manda convite a ninguém). Use quando ele pedir para marcar ou anotar algo na agenda. Pode gerar link do Google Meet.",
       inputSchema: z.object({
         titulo: z.string(),
         inicio: z.string().describe("ISO 8601 com fuso"),
         fim: z.string().describe("ISO 8601 com fuso"),
         descricao: z.string().optional(),
         local: z.string().optional(),
+        gerar_meet: z.boolean().optional().describe("Se verdadeiro, gera automaticamente um link do Google Meet para a reunião"),
       }),
-      run: async ({ titulo, inicio, fim, descricao, local }) => {
+      run: async ({ titulo, inicio, fim, descricao, local, gerar_meet }) => {
         const ini = data(inicio);
         const f = data(fim);
         const conflitos = (await google.eventos(ini, f)).filter((e) => !e.diaInteiro);
-        await google.criarEvento({ titulo, inicio: ini, fim: f, descricao, local });
+        const resId = await google.criarEvento({ titulo, inicio: ini, fim: f, descricao, local, meet: gerar_meet });
+        const meet = resId.includes("|") ? `\nLink do Meet: ${resId.split("|")[1]}` : "";
         const aviso = conflitos.length ? ` Atenção: bate com ${conflitos.map((e) => e.titulo).join(", ")}.` : "";
-        return `Evento criado: ${dataCurta(ini, fuso)} ${titulo}.${aviso}`;
+        return `Evento criado: ${dataCurta(ini, fuso)} ${titulo}.${aviso}${meet}`;
       },
     }),
     betaZodTool({

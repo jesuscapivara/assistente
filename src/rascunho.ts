@@ -48,7 +48,7 @@ export async function escreverRascunho(
     .filter(Boolean)
     .join("\n\n");
 
-  const texto = await deps.ia.escrever({ sistema: sistema(deps.dono, perfil), conteudo, esforco: "medium" });
+  const texto = await deps.ia.escrever({ sistema: sistema(deps.dono, perfil), conteudo, esforco: "medium", funcao: "rascunho" });
   if (!texto) throw new Error("não consegui escrever a resposta");
   return texto;
 }
