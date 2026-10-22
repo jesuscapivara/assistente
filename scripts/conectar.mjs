@@ -45,6 +45,9 @@ if (ja) {
   console.log(`Instância "${nome}" criada.`);
 }
 const tokenInstancia = ja?.token ?? token;
+if (ja?.token && process.env.EVOLUTION_INSTANCE_TOKEN && ja.token !== process.env.EVOLUTION_INSTANCE_TOKEN) {
+  console.log("Atenção: o EVOLUTION_INSTANCE_TOKEN do .env é diferente do da instância que já existe.");
+}
 
 // Mensagens, o histórico do pareamento (para já começar conhecendo as pessoas) e o
 // estado da sessão. O resto (presença, recibos, chamadas) o assistente não usa.
@@ -63,4 +66,6 @@ if (telefone) {
   await writeFile(arquivo, Buffer.from(m[1], "base64"));
   console.log(`\nQR code salvo em ${arquivo}. No celular: WhatsApp > Aparelhos conectados > Conectar aparelho.`);
 }
-if (!process.env.EVOLUTION_INSTANCE_TOKEN) console.log(`\nColoque no .env:\nEVOLUTION_INSTANCE_TOKEN=${tokenInstancia}`);
+if (process.env.EVOLUTION_INSTANCE_TOKEN !== tokenInstancia) {
+  console.log(`\nColoque no .env e rode docker compose up -d:\nEVOLUTION_INSTANCE_TOKEN=${tokenInstancia}`);
+}

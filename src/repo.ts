@@ -102,11 +102,14 @@ export async function registrarApelido(db: Db, a: string, b: string): Promise<st
   try {
     await c.query("BEGIN");
     await c.query("INSERT INTO apelidos (jid, principal) VALUES ($1, $2) ON CONFLICT DO NOTHING", [apelido, principal]);
-    const velho = (await c.query<Contato>(`SELECT ${COLUNAS_CONTATO} FROM contatos WHERE jid = $1`, [apelido])).rows[0];
-    if (velho) {
+    const velho = await c.query("SELECT 1 FROM contatos WHERE jid = $1", [apelido]);
+    if (velho.rowCount) {
       await c.query(
-        `INSERT INTO contatos (jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos)
-         VALUES ($1, $2, $3, FALSE, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO contatos (jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos,
+                               aguardando, aguardando_desde, cobrado_em, autonomia, ficha_em)
+         SELECT $1, nome, nome_push, FALSE, excluido, memoria, relacao, resumo, tom, assuntos_abertos,
+                aguardando, aguardando_desde, cobrado_em, autonomia, ficha_em
+         FROM contatos WHERE jid = $2
          ON CONFLICT (jid) DO UPDATE SET
            nome = COALESCE(contatos.nome, EXCLUDED.nome),
            nome_push = COALESCE(contatos.nome_push, EXCLUDED.nome_push),
@@ -114,12 +117,28 @@ export async function registrarApelido(db: Db, a: string, b: string): Promise<st
            memoria = trim(both E'\n' FROM contatos.memoria || E'\n' || EXCLUDED.memoria),
            relacao = COALESCE(contatos.relacao, EXCLUDED.relacao),
            resumo = CASE WHEN contatos.resumo = '' THEN EXCLUDED.resumo ELSE contatos.resumo END,
-           tom = CASE WHEN contatos.tom = '' THEN EXCLUDED.tom ELSE contatos.tom END`,
-        [principal, velho.nome, velho.nome_push, velho.excluido, velho.memoria, velho.relacao, velho.resumo, velho.tom, velho.assuntos_abertos],
+           tom = CASE WHEN contatos.tom = '' THEN EXCLUDED.tom ELSE contatos.tom END,
+           assuntos_abertos = CASE WHEN contatos.assuntos_abertos = '' THEN EXCLUDED.assuntos_abertos ELSE contatos.assuntos_abertos END,
+           aguardando = CASE WHEN contatos.aguardando = '' THEN EXCLUDED.aguardando ELSE contatos.aguardando END,
+           aguardando_desde = CASE WHEN contatos.aguardando = '' THEN EXCLUDED.aguardando_desde ELSE contatos.aguardando_desde END,
+           cobrado_em = CASE WHEN contatos.aguardando = '' THEN EXCLUDED.cobrado_em ELSE contatos.cobrado_em END,
+           -- O nível mais cauteloso vence: juntar não pode dar autonomia que o dono não deu.
+           autonomia = CASE WHEN contatos.autonomia IS NULL THEN EXCLUDED.autonomia
+                            WHEN EXCLUDED.autonomia IS NULL THEN contatos.autonomia
+                            ELSE LEAST(contatos.autonomia, EXCLUDED.autonomia) END,
+           -- A ficha mais antiga: as mensagens juntas pedem leitura nova.
+           ficha_em = LEAST(contatos.ficha_em, EXCLUDED.ficha_em)`,
+        [principal, apelido],
       );
       for (const t of ["mensagens", "compromissos", "rascunhos"]) {
         await c.query(`UPDATE ${t} SET chat_jid = $2 WHERE chat_jid = $1`, [apelido, principal]);
       }
+      // Datas têm chave única por pessoa e dia: a que já existir no número fica.
+      await c.query(
+        `INSERT INTO datas (chat_jid, descricao, mes, dia) SELECT $1, descricao, mes, dia FROM datas WHERE chat_jid = $2
+         ON CONFLICT (chat_jid, mes, dia) DO NOTHING`,
+        [principal, apelido],
+      );
       await c.query("DELETE FROM contatos WHERE jid = $1", [apelido]);
     }
     await c.query("COMMIT");
@@ -216,9 +235,31 @@ export async function lembrar(db: Db, jid: string, fatos: string[], teto = 4000)
 }
 
 export async function excluirChat(db: Db, jid: string, excluido: boolean): Promise<void> {
-  await db.query("UPDATE contatos SET excluido = $2, atualizado_em = now() WHERE jid = $1", [jid, excluido]);
-  // Quem sai do assistente sai por inteiro: o texto já gravado vai junto.
-  if (excluido) await db.query("DELETE FROM mensagens WHERE chat_jid = $1", [jid]);
+  if (!excluido) {
+    await db.query("UPDATE contatos SET excluido = FALSE, atualizado_em = now() WHERE jid = $1", [jid]);
+    return;
+  }
+  // Quem sai do assistente sai por inteiro: texto, ficha, compromissos, datas e os
+  // rascunhos (inclusive o que estava agendado para sair). Fica só o nome, para o "volta".
+  const c = await db.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query(
+      `UPDATE contatos SET excluido = TRUE, memoria = '', relacao = NULL, resumo = '', tom = '', assuntos_abertos = '',
+         aguardando = '', aguardando_desde = NULL, cobrado_em = NULL, autonomia = NULL, ficha_em = NULL, atualizado_em = now()
+       WHERE jid = $1`,
+      [jid],
+    );
+    for (const t of ["mensagens", "compromissos", "datas", "rascunhos"]) {
+      await c.query(`DELETE FROM ${t} WHERE chat_jid = $1`, [jid]);
+    }
+    await c.query("COMMIT");
+  } catch (err) {
+    await c.query("ROLLBACK");
+    throw err;
+  } finally {
+    c.release();
+  }
 }
 
 export async function criarCompromisso(
@@ -243,7 +284,7 @@ export async function compromissosAbertos(db: Db, ate?: Date): Promise<Compromis
     `SELECT k.id, k.chat_jid, k.descricao, k.quando, k.responsavel, k.status,
             COALESCE(c.nome, c.nome_push) AS contato_nome
      FROM compromissos k JOIN contatos c ON c.jid = k.chat_jid
-     WHERE k.status IN ('sugerido','confirmado') AND ($1::timestamptz IS NULL OR k.quando IS NULL OR k.quando <= $1)
+     WHERE k.status IN ('sugerido','confirmado') AND NOT c.excluido AND ($1::timestamptz IS NULL OR k.quando IS NULL OR k.quando <= $1)
      ORDER BY k.quando NULLS LAST, k.id`,
     [ate ?? null],
   );
@@ -296,15 +337,20 @@ export async function buscarMensagens(
   return r.rows;
 }
 
+/** Mensagem "de mim" que foi o assistente quem escreveu: não ensina estilo. */
+export const NAO_FOI_RASCUNHO = "NOT EXISTS (SELECT 1 FROM rascunhos r WHERE r.mensagem_id = m.id)";
+
 /** Exemplos de como o dono escreve, para o rascunho sair na voz dele. */
 export async function exemplosDoDono(db: Db, chatJid: string | null, limite = 40): Promise<string[]> {
   const r = await db.query<{ texto: string }>(
-    `(SELECT texto, enviada_em FROM mensagens WHERE de_mim AND tipo = 'texto' AND length(texto) > 3 AND chat_jid = $1
-      ORDER BY enviada_em DESC LIMIT $2)
+    `(SELECT m.texto, m.enviada_em FROM mensagens m
+      WHERE m.de_mim AND m.tipo = 'texto' AND length(m.texto) > 3 AND m.chat_jid = $1 AND ${NAO_FOI_RASCUNHO}
+      ORDER BY m.enviada_em DESC LIMIT $2)
      UNION ALL
-     (SELECT texto, enviada_em FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
-      WHERE m.de_mim AND m.tipo = 'texto' AND length(m.texto) > 3 AND NOT c.grupo AND m.chat_jid <> COALESCE($1, '')
-      ORDER BY enviada_em DESC LIMIT $2)`,
+     (SELECT m.texto, m.enviada_em FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
+      WHERE m.de_mim AND m.tipo = 'texto' AND length(m.texto) > 3 AND NOT c.grupo AND NOT c.excluido
+        AND m.chat_jid <> COALESCE($1, '') AND ${NAO_FOI_RASCUNHO}
+      ORDER BY m.enviada_em DESC LIMIT $2)`,
     [chatJid, limite],
   );
   return r.rows.map((x) => x.texto).slice(0, limite);
@@ -318,24 +364,78 @@ export async function criarRascunho(db: Db, chatJid: string, texto: string, pedi
   return r.rows[0].id;
 }
 
-export async function lerRascunho(db: Db, id?: number): Promise<Rascunho | null> {
-  const r = id
-    ? await db.query<Rascunho>("SELECT id, chat_jid, texto, pedido, status FROM rascunhos WHERE id = $1", [id])
-    : await db.query<Rascunho>(
-        "SELECT id, chat_jid, texto, pedido, status FROM rascunhos WHERE status = 'aguardando' ORDER BY id DESC LIMIT 1",
-      );
+export async function lerRascunho(db: Db, id: number): Promise<Rascunho | null> {
+  const r = await db.query<Rascunho>("SELECT id, chat_jid, texto, pedido, status FROM rascunhos WHERE id = $1", [id]);
   return r.rows[0] ?? null;
 }
 
-export async function atualizarRascunho(db: Db, id: number, texto: string): Promise<void> {
-  await db.query("UPDATE rascunhos SET texto = $2 WHERE id = $1", [id, texto]);
+/** Os rascunhos aguardando, do mais novo ao mais velho. */
+export async function rascunhosAguardando(db: Db, limite = 10): Promise<Rascunho[]> {
+  const r = await db.query<Rascunho>(
+    "SELECT id, chat_jid, texto, pedido, status FROM rascunhos WHERE status = 'aguardando' ORDER BY id DESC LIMIT $1",
+    [limite],
+  );
+  return r.rows;
+}
+
+/** Troca o texto só se o rascunho ainda espera: o que já saiu não muda depois. */
+export async function atualizarRascunho(db: Db, id: number, texto: string): Promise<boolean> {
+  const r = await db.query("UPDATE rascunhos SET texto = $2 WHERE id = $1 AND status = 'aguardando'", [id, texto]);
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function decidirRascunho(db: Db, id: number, status: "enviado" | "descartado"): Promise<boolean> {
   // Só sai de "aguardando": dois "ok" seguidos não mandam a mesma resposta duas vezes.
   const r = await db.query(
-    "UPDATE rascunhos SET status = $2, decidido_em = now() WHERE id = $1 AND status = 'aguardando'",
+    "UPDATE rascunhos SET status = $2, decidido_em = now(), enviar_em = NULL WHERE id = $1 AND status = 'aguardando'",
     [id, status],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** Condições do envio sem o dono olhar (autonomia nível 2 ou 3). */
+export interface EnvioAutomatico {
+  padrao: number;
+  nivelMinimo: 2 | 3;
+  /** Nível 2: só sai se continua agendado (veto, ajuste e pausa limpam o horário). */
+  agendado: boolean;
+  agora: Date;
+}
+
+/**
+ * Reserva o rascunho para envio e devolve o texto que vai sair. Tudo é conferido no
+ * mesmo UPDATE: entre ler e enviar o dono pode ter vetado, ajustado, pausado, baixado o
+ * nível, tirado a pessoa do assistente ou respondido à mão, e nada disso pode escapar.
+ */
+export async function reservarEnvio(
+  db: Db,
+  id: number,
+  auto?: EnvioAutomatico,
+): Promise<{ chat_jid: string; texto: string } | null> {
+  const r = await db.query<{ chat_jid: string; texto: string }>(
+    `UPDATE rascunhos r SET status = 'enviado', decidido_em = now(), enviar_em = NULL
+     FROM contatos c
+     WHERE r.id = $1 AND r.status = 'aguardando' AND c.jid = r.chat_jid AND NOT c.excluido
+       AND r.texto !~* '\\[preencher:'
+       AND ($2::int IS NULL OR (
+         NOT c.grupo AND NOT r.ajustado AND r.risco = 'baixo'
+         AND COALESCE(c.autonomia, $3::int) >= $2::int
+         AND (NOT $4::boolean OR (r.enviar_em IS NOT NULL AND r.enviar_em <= $5::timestamptz))
+         AND NOT EXISTS (SELECT 1 FROM estado WHERE chave = 'autonomia:pausada' AND valor = '1')
+         AND NOT EXISTS (SELECT 1 FROM mensagens m WHERE m.chat_jid = r.chat_jid AND m.de_mim AND m.enviada_em > r.criado_em)
+       ))
+     RETURNING r.chat_jid, r.texto`,
+    [id, auto?.nivelMinimo ?? null, auto?.padrao ?? 0, auto?.agendado ?? false, auto?.agora ?? new Date()],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** Agenda o envio com janela de veto, se o rascunho ainda espera e nada foi pausado. */
+export async function agendarEnvio(db: Db, id: number, quando: Date): Promise<boolean> {
+  const r = await db.query(
+    `UPDATE rascunhos SET enviar_em = $2 WHERE id = $1 AND status = 'aguardando'
+       AND NOT EXISTS (SELECT 1 FROM estado WHERE chave = 'autonomia:pausada' AND valor = '1')`,
+    [id, quando],
   );
   return (r.rowCount ?? 0) > 0;
 }
@@ -517,9 +617,12 @@ export async function datasProximas(
 }
 
 export async function nivelDeAutonomia(db: Db, jid: string, padrao: number): Promise<number> {
-  const r = await db.query<{ autonomia: number | null; grupo: boolean }>("SELECT autonomia, grupo FROM contatos WHERE jid = $1", [jid]);
+  const r = await db.query<{ autonomia: number | null; grupo: boolean; excluido: boolean }>(
+    "SELECT autonomia, grupo, excluido FROM contatos WHERE jid = $1",
+    [jid],
+  );
   const c = r.rows[0];
-  if (!c) return 0;
+  if (!c || c.excluido) return 0;
   // Grupo nunca recebe resposta automática: quem responde em grupo é o dono.
   if (c.grupo) return 0;
   return c.autonomia ?? padrao;

@@ -93,14 +93,16 @@ export async function responderSozinho(deps: DepsAutonomia, jid: string): Promis
   const { risco, motivo } = nivel >= 2 && !preencher && !pausado ? await classificar(deps, conversa, texto) : { risco: "alto" as const, motivo: "" };
   await deps.db.query("UPDATE rascunhos SET automatico = TRUE, risco = $2, motivo_risco = $3 WHERE id = $1", [id, risco, motivo]);
 
+  // Nível, pausa e exclusão foram lidos antes de duas chamadas ao modelo: o envio e o
+  // agendamento conferem tudo de novo no banco, na hora (reservarEnvio, agendarEnvio).
   const podeSozinho = nivel >= 2 && risco === "baixo" && !preencher && !pausado && horaDecente(agora, deps.fuso);
   if (podeSozinho && nivel === 3) {
     const r = await repo.lerRascunho(deps.db, id);
-    if (r && (await executarEnvio(deps, r, `\n> ${texto}\n_(nível 3: risco baixo, enviei direto)_`))) return "enviado";
+    const auto = { padrao: deps.padrao, nivelMinimo: 3 as const, agendado: false, agora };
+    if (r && (await executarEnvio(deps, r, `\n> ${texto}\n_(nível 3: risco baixo, enviei direto)_`, auto))) return "enviado";
   }
-  if (podeSozinho && nivel === 2) {
-    const quando = new Date(agora.getTime() + deps.janelaMin * 60_000);
-    await deps.db.query("UPDATE rascunhos SET enviar_em = $2 WHERE id = $1", [id, quando]);
+  const quando = new Date(agora.getTime() + deps.janelaMin * 60_000);
+  if (podeSozinho && nivel === 2 && (await repo.agendarEnvio(deps.db, id, quando))) {
     await deps.avisar(
       `Respondo *${nome}* em ${deps.janelaMin} min se você não vetar:\n\n${texto}\n\n_veta ${id} · ok ${id} (manda já) · ajusta ${id} <o quê>_`,
     );
@@ -122,7 +124,14 @@ export async function enviarAgendados(deps: DepsAutonomia): Promise<number> {
       await deps.db.query("UPDATE rascunhos SET enviar_em = NULL WHERE id = $1", [r.id]);
       continue;
     }
-    if (await executarEnvio(deps, r, " _(ninguém vetou)_")) enviados++;
+    const auto = { padrao: deps.padrao, nivelMinimo: 2 as const, agendado: true, agora };
+    if (await executarEnvio(deps, r, " _(ninguém vetou)_", auto)) {
+      enviados++;
+      continue;
+    }
+    // Não saiu porque algo mudou (o dono respondeu à mão, ajustou, pausou): volta a
+    // esperar o ok, em vez de ser tentado de novo a cada minuto.
+    await deps.db.query("UPDATE rascunhos SET enviar_em = NULL WHERE id = $1 AND status = 'aguardando'", [r.id]);
   }
   return enviados;
 }

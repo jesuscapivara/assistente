@@ -43,15 +43,20 @@ export function iniciarAgenda(opts: {
     }
   }, opts.continua.intervaloSeg * 1000);
 
+  // Duas travas: uma diária demorada (o estudo das 4h, ou várias atrasadas depois de
+  // uma parada) não pode segurar o envio agendado nem o briefing do minuto.
   let noMinuto = false;
+  let nasDiarias = false;
   const minuto = async () => {
-    if (noMinuto) return;
-    noMinuto = true;
-    try {
-      for (const f of opts.porMinuto) await f().catch((err) => opts.log({ err: String(err) }, "tarefa do minuto falhou"));
-      await tique({ db: opts.db, fuso: opts.fuso, diarias: opts.diarias, log: opts.log });
-    } finally {
-      noMinuto = false;
+    if (!noMinuto) {
+      noMinuto = true;
+      void (async () => {
+        for (const f of opts.porMinuto) await f().catch((err) => opts.log({ err: String(err) }, "tarefa do minuto falhou"));
+      })().finally(() => (noMinuto = false));
+    }
+    if (!nasDiarias) {
+      nasDiarias = true;
+      void tique({ db: opts.db, fuso: opts.fuso, diarias: opts.diarias, log: opts.log }).finally(() => (nasDiarias = false));
     }
   };
   const relogioMinuto = setInterval(() => void minuto(), 60_000);

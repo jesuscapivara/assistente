@@ -43,7 +43,8 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
 Em qualquer nível, **dinheiro, preço, contrato, prazo, assunto delicado ou rascunho com
 `[preencher: …]` esperam o seu ok**: há uma barreira por palavras, sem modelo, e outra de
 classificação de risco. Grupo nunca recebe resposta automática, e nada sai sozinho entre 21h e
-8h. `pausa` desliga tudo na hora.
+8h. Se você responder à mão antes de a janela de veto acabar, a resposta automática não sai.
+`pausa` desliga tudo na hora.
 
 ## Canal de controle
 
@@ -55,7 +56,7 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `o que eu combinei com a Fernanda?` | pergunta livre: ele procura nas conversas, agenda, e-mail e KoreOS |
 | `responde o João dizendo que amanhã não dá` | rascunho na sua voz, para aprovar |
 | `marca com a Fernanda quinta à tarde` | vê horários livres e cria o evento |
-| `ok` / `ok 12` · `ajusta 12 mais curto` · `descarta 12` / `veta 12` | rascunhos |
+| `ok 12` · `ajusta 12 mais curto` · `descarta 12` / `veta 12` | rascunhos (sem número, só se houver um aguardando) |
 | `confirma 5` · `feito 5` · `ignora 5` | compromissos |
 | `cobra João` | rascunho cobrando o que ele ficou de mandar |
 | `autonomia` · `autonomia Fernanda 2` | níveis e taxa de aprovação sem ajuste |
@@ -79,7 +80,8 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
    cp .env.example .env
    ```
    Obrigatórios no `.env`:
-   - `POSTGRES_PASSWORD` e `WEBHOOK_TOKEN` (`openssl rand -hex 24` serve para os dois);
+   - `POSTGRES_PASSWORD`, `WEBHOOK_TOKEN` e `EVOLUTION_INSTANCE_TOKEN` (`openssl rand -hex 24`
+     para cada um);
    - `EVOLUTION_NETWORK` e `EVOLUTION_API_URL` (`docker ps | grep evolution`, `docker network ls`);
    - `EVOLUTION_GLOBAL_API_KEY`, a mesma do KoreOS (só para criar a instância);
    - `WEBHOOK_URL_PUBLICA=http://assistente:3100/webhook/<WEBHOOK_TOKEN>`;
@@ -93,8 +95,9 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
    docker compose run --rm assistente node scripts/conectar.mjs --telefone 5551999990000
    ```
    No celular: *WhatsApp > Aparelhos conectados > Conectar com número de telefone* e digite o
-   código. Copie o `EVOLUTION_INSTANCE_TOKEN` impresso para o `.env` e rode
-   `docker compose up -d`. Uns minutos depois chega "Recebi N mensagens antigas…".
+   código. O serviço já está no ar e recebe o histórico: uns minutos depois chega "Recebi N
+   mensagens antigas…". (Se a instância já existia com outro token, o script imprime o token
+   dela: troque no `.env` e rode `docker compose up -d`.)
 
 4. **Testar**: mande `ajuda` no seu chat consigo mesmo. Se não responder, veja o log; se o seu
    chat consigo mesmo vier como `...@lid`, coloque o JID em `DONO_LIDS`.
@@ -134,6 +137,6 @@ muitos grupos, troque só `MODELO_EXTRACAO`.
 
 - Tudo fica no Postgres da VM; sai só para o Claude (e para a transcrição e o Google, se ligados).
 - Texto bruto apagado depois de `RETENCAO_DIAS` (365); a ficha e a memória de cada pessoa ficam.
-- `fora <nome>` apaga na hora tudo daquela conversa.
+- `fora <nome>` apaga na hora tudo daquela conversa: mensagens, ficha, compromissos, datas e rascunhos.
 - Webhook, painel e engine sem porta pública; os tokens não aparecem no log.
 - E-mail nunca é enviado (só rascunho no Gmail); evento nunca leva convidado.

@@ -45,6 +45,22 @@ export function relogio(d: Date, fuso: string): { dia: string; hora: string } {
   return { dia: `${partes.year}-${partes.month}-${partes.day}`, hora: `${partes.hour}:${partes.minute}` };
 }
 
+/**
+ * Meia-noite de um dia ("2026-10-22") no fuso do dono, como instante. Evento de dia
+ * inteiro vem do Google só com a data; lida no fuso do container (UTC), viraria 21h
+ * do dia anterior em São Paulo.
+ */
+export function meiaNoiteEm(data: string, fuso: string): Date {
+  const [a, m, d] = data.split("-").map(Number);
+  const utc = Date.UTC(a, m - 1, d);
+  const r = relogio(new Date(utc), fuso);
+  const [ra, rm, rd] = r.dia.split("-").map(Number);
+  const [hh, mm] = r.hora.split(":").map(Number);
+  // Quanto o relógio do fuso está à frente do UTC naquele instante (-3h em São Paulo).
+  const diferenca = Date.UTC(ra, rm - 1, rd, hh, mm) - utc;
+  return new Date(utc - diferenca);
+}
+
 /** Conversa em linhas: "[21/10 14:32] Fernanda: texto". */
 export function linhas(msgs: Mensagem[], dono: string, contato: string, fuso: string): string {
   return msgs

@@ -3,6 +3,7 @@ import { riscoPorPalavra } from "../src/autonomia.js";
 import { lerConfig } from "../src/config.js";
 import { lerComando, sugerirSubir } from "../src/controle.js";
 import { criarGoogle, horariosLivres } from "../src/google.js";
+import { dataCurta, meiaNoiteEm } from "../src/formato.js";
 import { comandoDoPainel } from "../src/painel.js";
 
 const SP = "America/Sao_Paulo";
@@ -135,6 +136,9 @@ describe("cliente do Google", () => {
     expect(evs.map((e) => e.id)).toEqual(["e1", "e3"]);
     expect(evs[0].convidados).toEqual([{ email: "fe@x.com", nome: "Fernanda Moraes" }]);
     expect(evs[1].diaInteiro).toBe(true);
+    // Dia inteiro é meia-noite em São Paulo, não 21h da véspera (container em UTC).
+    expect(evs[1].inicio.toISOString()).toBe("2026-11-02T03:00:00.000Z");
+    expect(dataCurta(evs[1].inicio, SP).slice(0, 5)).toBe("02/11");
     expect((chamadas[1].init?.headers as Record<string, string>).Authorization).toBe("Bearer AT");
   });
 
@@ -148,6 +152,14 @@ describe("cliente do Google", () => {
     expect(raw).toContain("Subject: =?UTF-8?B?");
     expect(raw).toContain("In-Reply-To: m1");
     expect(raw.endsWith("\r\n\r\nOlá")).toBe(true);
+  });
+});
+
+describe("meiaNoiteEm", () => {
+  it("meia-noite no fuso do dono", () => {
+    expect(meiaNoiteEm("2026-10-22", SP).toISOString()).toBe("2026-10-22T03:00:00.000Z");
+    expect(meiaNoiteEm("2026-10-22", "UTC").toISOString()).toBe("2026-10-22T00:00:00.000Z");
+    expect(meiaNoiteEm("2026-07-01", "Europe/Lisbon").toISOString()).toBe("2026-06-30T23:00:00.000Z");
   });
 });
 

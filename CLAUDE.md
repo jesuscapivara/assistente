@@ -8,6 +8,9 @@ Leia o README antes (fluxo, comandos, instalação).
   nível 2 com janela de veto, nível 3 direto, e nunca com risco alto, `[preencher:]`, em grupo,
   entre 21h e 8h ou com `pausa`. Não crie outro caminho de envio nem afrouxe essas travas sem
   pedido explícito do Lucas. E-mail: só rascunho no Gmail. Evento: sem convidados.
+- As travas do envio automático são conferidas no banco, no mesmo UPDATE que reserva o rascunho
+  (`repo.reservarEnvio`): entre ler e enviar, o dono pode vetar, ajustar, pausar, baixar o nível,
+  tirar a pessoa ou responder à mão. Não confira só em memória antes de enviar.
 - Tudo que o assistente escreve vai para o chat do dono consigo mesmo, com 🤖, pela função
   `avisar`, que registra o id em `enviadas` (senão o eco do webhook vira comando, em laço).
 - Chat `excluido` não grava nada; `fora` apaga o que havia. Respeite isso em qualquer consulta nova.

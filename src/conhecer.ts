@@ -79,7 +79,7 @@ export async function estudarDono(deps: DepsConhecer): Promise<boolean> {
   const r = await deps.db.query<{ texto: string; relacao: string | null; contato: string; grupo: boolean }>(
     `SELECT m.texto, c.relacao, COALESCE(c.nome, c.nome_push, split_part(c.jid, '@', 1)) AS contato, c.grupo
      FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
-     WHERE m.de_mim AND m.tipo = 'texto' AND length(m.texto) > 2 AND NOT c.excluido
+     WHERE m.de_mim AND m.tipo = 'texto' AND length(m.texto) > 2 AND NOT c.excluido AND ${repo.NAO_FOI_RASCUNHO}
      ORDER BY m.enviada_em DESC LIMIT 600`,
   );
   if (r.rows.length < 30) return false;

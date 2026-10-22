@@ -6,6 +6,7 @@
  * Escopos: agenda (ler e criar eventos), livre/ocupado, Gmail leitura e rascunho.
  * Não há escopo de envio de e-mail: rascunho de e-mail fica no Gmail para o dono enviar.
  */
+import { meiaNoiteEm } from "./formato.js";
 
 export interface Evento {
   id: string;
@@ -28,6 +29,8 @@ export interface Email {
   trecho: string;
   corpo: string;
   naoLido: boolean;
+  /** Cabeçalho Message-ID (RFC 2822): é ele que encadeia a resposta, não o id do Gmail. */
+  messageId: string;
 }
 
 export interface Google {
@@ -94,7 +97,7 @@ export function criarGoogle(
         maxResults: "100",
       });
       const j = await chamar<{ items?: any[] }>(`${CAL}/calendars/primary/events?${q}`);
-      return (j.items ?? []).filter((e) => e.status !== "cancelled").map(lerEvento);
+      return (j.items ?? []).filter((e) => e.status !== "cancelled").map((e) => lerEvento(e, cred.fuso));
     },
 
     async ocupado(de, ate) {
@@ -125,7 +128,7 @@ export function criarGoogle(
       const j = await chamar<{ messages?: { id: string }[] }>(`${GMAIL}/messages?${q}`);
       const lista: Email[] = [];
       for (const m of j.messages ?? []) {
-        const det = await chamar<any>(`${GMAIL}/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`);
+        const det = await chamar<any>(`${GMAIL}/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`);
         lista.push(lerEmail(det, false));
       }
       return lista;
@@ -154,10 +157,10 @@ export function criarGoogle(
   };
 }
 
-function lerEvento(e: any): Evento {
+function lerEvento(e: any, fuso: string): Evento {
   const diaInteiro = Boolean(e.start?.date && !e.start?.dateTime);
-  const inicio = new Date(e.start?.dateTime ?? `${e.start?.date}T00:00:00`);
-  const fim = new Date(e.end?.dateTime ?? `${e.end?.date}T00:00:00`);
+  const inicio = e.start?.dateTime ? new Date(e.start.dateTime) : meiaNoiteEm(e.start?.date ?? "", fuso);
+  const fim = e.end?.dateTime ? new Date(e.end.dateTime) : meiaNoiteEm(e.end?.date ?? "", fuso);
   return {
     id: e.id,
     titulo: e.summary ?? "(sem título)",
@@ -207,6 +210,7 @@ function lerEmail(msg: any, comCorpo: boolean): Email {
     trecho: msg.snippet ?? "",
     corpo: comCorpo ? corpoDe(msg.payload).slice(0, 8000) : "",
     naoLido: (msg.labelIds ?? []).includes("UNREAD"),
+    messageId: cabecalho(msg, "Message-ID"),
   };
 }
 

@@ -109,7 +109,7 @@ export function ferramentasGoogle({ google, fuso, expediente }: DepsGoogle) {
         if (responder_ao_id) {
           const original = await google.email(responder_ao_id);
           threadId = original.threadId;
-          emResposta = responder_ao_id;
+          emResposta = original.messageId || undefined;
         }
         await google.rascunhoEmail({ para, assunto, corpo, threadId, emResposta });
         return "Rascunho deixado no Gmail, para ele revisar e enviar.";

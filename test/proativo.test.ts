@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { enviarAgendados, responderSozinho, type DepsAutonomia } from "../src/autonomia.js";
-import { tratarComando, type DepsControle } from "../src/controle.js";
+import { criarFerramentas, executarEnvio, tratarComando, type DepsControle } from "../src/controle.js";
 import { abrirDb, migrar, type Db } from "../src/db.js";
 import { extrairChat } from "../src/extracao.js";
 import type { Evento, Google } from "../src/google.js";
@@ -213,6 +213,107 @@ describe.skipIf(!URL_TESTE)("fases 2 a 5 com banco", () => {
     expect(await enviarAgendados(auto)).toBe(0);
     expect(whats.enviadas).toHaveLength(1);
     expect((await repo.lerRascunho(db, 3))?.status).toBe("aguardando");
+  });
+
+  it("autonomia 2: não sai se o dono respondeu à mão, ajustou ou pausou durante a janela", async () => {
+    await ing(msg(FERNANDA, "Pode ser quinta às 15h?"));
+    await repo.definirAutonomia(db, FERNANDA, 2);
+    expect(await responderSozinho(auto, FERNANDA)).toBe("agendado");
+    // Ele respondeu pelo celular antes de a janela acabar.
+    await ing(msg(FERNANDA, "Fechado, quinta 15h", { deMim: true, quando: new Date(Date.now() + 1000) }));
+    agora = new Date(agora.getTime() + 11 * 60_000);
+    expect(await enviarAgendados(auto)).toBe(0);
+    expect(whats.enviadas).toHaveLength(0);
+    expect((await repo.lerRascunho(db, 1))?.status).toBe("aguardando");
+
+    // Rascunho agendado que o dono ajusta: o prazo vencido não manda o texto antigo.
+    await ing(msg(FERNANDA, "e sexta?", { quando: new Date(Date.now() + 2000) }));
+    await tratarComando(deps, "descarta 1");
+    expect(await responderSozinho(auto, FERNANDA)).toBe("agendado");
+    ia.rascunho = "Sexta não consigo, pode ser segunda?";
+    await tratarComando(deps, "ajusta 2 diz que sexta não dá");
+    agora = new Date(agora.getTime() + 11 * 60_000);
+    expect(await enviarAgendados(auto)).toBe(0);
+    expect(whats.enviadas).toHaveLength(0);
+    const r2 = await db.query("SELECT texto, pedido, ajustado, enviar_em FROM rascunhos WHERE id = 2");
+    expect(r2.rows[0]).toMatchObject({ texto: "Sexta não consigo, pode ser segunda?", ajustado: true, enviar_em: null });
+    // O ajuste fica no pedido: é dele que saem as lições.
+    expect(r2.rows[0].pedido).toMatch(/Ajuste: diz que sexta não dá/);
+
+    // Pausado entre o agendamento e o envio, mesmo com o horário ainda gravado.
+    await tratarComando(deps, "descarta 2");
+    await ing(msg(FERNANDA, "e sábado?", { quando: new Date(Date.now() + 3000) }));
+    ia.rascunho = "Sábado pode!";
+    expect(await responderSozinho(auto, FERNANDA)).toBe("agendado");
+    await db.query("INSERT INTO estado (chave, valor) VALUES ('autonomia:pausada', '1')");
+    agora = new Date(agora.getTime() + 11 * 60_000);
+    const [r3] = await repo.rascunhosParaEnviar(db, agora);
+    expect(await executarEnvio(deps, r3, "", { padrao: 0, nivelMinimo: 2, agendado: true, agora })).toBe(false);
+    expect(whats.enviadas).toHaveLength(0);
+  });
+
+  it("ok sem número só vale com um rascunho aguardando", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    await repo.criarRascunho(db, FERNANDA, "r1", "x");
+    await repo.criarRascunho(db, FERNANDA, "r2", "x");
+    await tratarComando(deps, "ok");
+    expect(avisos.at(-1)).toMatch(/Há 2 rascunhos aguardando: diga o número \(#2, #1\)/);
+    await tratarComando(deps, "descarta");
+    expect(whats.enviadas).toHaveLength(0);
+    await tratarComando(deps, "descarta 2");
+    await tratarComando(deps, "ok");
+    expect(whats.enviadas).toEqual([{ destino: FERNANDA, texto: "r1" }]);
+    await tratarComando(deps, "ok 1");
+    expect(avisos.at(-1)).toMatch(/Não há rascunho aguardando com esse número/);
+  });
+
+  it("fora apaga ficha, compromissos, datas e rascunhos, e a autonomia deixa de valer", async () => {
+    await ing(msg(FERNANDA, "oi"));
+    await repo.definirAutonomia(db, FERNANDA, 3);
+    await repo.lembrar(db, FERNANDA, ["filha se chama Ana"]);
+    await repo.atualizarFicha(db, FERNANDA, { relacao: "cliente", resumo: "cliente da cozinha" });
+    await repo.criarCompromisso(db, { chatJid: FERNANDA, descricao: "visita", quando: null, responsavel: "eu" });
+    await repo.gravarDatas(db, FERNANDA, [{ descricao: "aniversário", mes: 10, dia: 24 }]);
+    const id = await repo.criarRascunho(db, FERNANDA, "Combinado!", "x");
+    await db.query("UPDATE rascunhos SET risco = 'baixo', enviar_em = $2 WHERE id = $1", [id, agora]);
+
+    await tratarComando(deps, "fora Fernanda");
+    const f = await repo.lerContato(db, FERNANDA);
+    expect(f).toMatchObject({ excluido: true, memoria: "", relacao: null, resumo: "", autonomia: null });
+    expect(await repo.compromissosAbertos(db)).toEqual([]);
+    expect(await repo.datasProximas(db, { ano: 2026, mes: 10, dia: 22 }, 7)).toEqual([]);
+    expect(await repo.rascunhosParaEnviar(db, new Date(agora.getTime() + 60_000))).toEqual([]);
+    expect(await repo.nivelDeAutonomia(db, FERNANDA, 3)).toBe(0);
+    expect(await enviarAgendados({ ...auto, padrao: 3 })).toBe(0);
+    expect(whats.enviadas).toHaveLength(0);
+  });
+
+  it("juntar LID e número mantém o nível mais cauteloso e as datas", async () => {
+    const LID = "99887766@lid";
+    await repo.garantirContato(db, FERNANDA, { grupo: false });
+    await repo.garantirContato(db, LID, { grupo: false, nomePush: "Fernanda" });
+    await repo.definirAutonomia(db, LID, 0);
+    await repo.definirAutonomia(db, FERNANDA, 2);
+    await repo.gravarDatas(db, LID, [{ descricao: "aniversário", mes: 10, dia: 24 }]);
+    await repo.atualizarAguardando(db, LID, "as medidas");
+    await repo.registrarApelido(db, LID, FERNANDA);
+    const f = await repo.lerContato(db, FERNANDA);
+    expect(f).toMatchObject({ autonomia: 0, aguardando: "as medidas" });
+    expect((await repo.datasProximas(db, { ano: 2026, mes: 10, dia: 22 }, 7)).map((d) => d.jid)).toEqual([FERNANDA]);
+  });
+
+  it("ferramentas do agente: LID vira o número e conversa excluída não existe", async () => {
+    const LID = "99887766@lid";
+    await ing(msg(FERNANDA, "oi"));
+    await repo.registrarApelido(db, LID, FERNANDA);
+    const ferramentas = criarFerramentas(deps) as unknown as { name: string; run(x: any): Promise<string> }[];
+    const lembrar = ferramentas.find((f) => f.name === "lembrar_fato")!;
+    expect(await lembrar.run({ jid: LID, fato: "filha se chama Ana" })).toBe("Guardado.");
+    expect((await repo.lerContato(db, FERNANDA))?.memoria).toMatch(/Ana/);
+    expect(await lembrar.run({ jid: "000@s.whatsapp.net", fato: "x" })).toMatch(/não encontrada/);
+    await tratarComando(deps, "fora Fernanda");
+    expect(await lembrar.run({ jid: FERNANDA, fato: "y" })).toMatch(/não encontrada/);
+    expect((await repo.lerContato(db, FERNANDA))?.memoria).toBe("");
   });
 
   it("risco alto nunca sai sozinho: palavra de dinheiro, classificador e [preencher]", async () => {

@@ -91,7 +91,7 @@ export function lerComando(texto: string): Comando {
 }
 
 const AJUDA = `*Comandos*
-• ok N — envia o rascunho N (sem número: o último)
+• ok N — envia o rascunho N (sem número: só se houver um aguardando)
 • ajusta N <o quê> — refaz o rascunho
 • descarta N
 • confirma N · feito N · ignora N — compromissos
@@ -116,18 +116,22 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
     case "enviar":
       return enviarRascunho(deps, c.id);
     case "descartar": {
-      const r = await repo.lerRascunho(deps.db, c.id);
-      if (!r || r.status !== "aguardando") return deps.avisar("Não há rascunho aguardando com esse número.");
-      await repo.decidirRascunho(deps.db, r.id, "descartado");
+      const r = await rascunhoDoComando(deps, c.id);
+      if (!r) return;
+      if (!(await repo.decidirRascunho(deps.db, r.id, "descartado"))) return deps.avisar(`O #${r.id} já tinha sido decidido.`);
       return deps.avisar(`Rascunho #${r.id} descartado.`);
     }
     case "ajustar": {
-      const r = await repo.lerRascunho(deps.db, c.id);
-      if (!r || r.status !== "aguardando") return deps.avisar("Não há rascunho aguardando com esse número.");
+      const r = await rascunhoDoComando(deps, c.id);
+      if (!r) return;
+      // Sai do envio automático antes de chamar o modelo, que leva segundos: o prazo de
+      // veto não pode vencer no meio e mandar o texto antigo. Conta contra a taxa de acerto.
+      const ainda = await deps.db.query("UPDATE rascunhos SET ajustado = TRUE, enviar_em = NULL WHERE id = $1 AND status = 'aguardando'", [r.id]);
+      if (!ainda.rowCount) return deps.avisar(`O #${r.id} já tinha sido decidido.`);
       const novo = await escreverRascunho(deps, r.chat_jid, `${r.pedido}\nAjuste: ${c.instrucao}`, r.texto);
-      await repo.atualizarRascunho(deps.db, r.id, novo);
-      // Mexeu, então decide: sai do envio automático e conta contra a taxa de acerto.
-      await deps.db.query("UPDATE rascunhos SET ajustado = TRUE, enviar_em = NULL WHERE id = $1", [r.id]);
+      if (!(await repo.atualizarRascunho(deps.db, r.id, novo))) return deps.avisar(`O #${r.id} foi decidido enquanto eu ajustava.`);
+      // O pedido guarda os ajustes: o "ajusta" seguinte e as lições partem deles.
+      await deps.db.query("UPDATE rascunhos SET pedido = $2 WHERE id = $1", [r.id, `${r.pedido}\nAjuste: ${c.instrucao}`]);
       const contato = await repo.lerContato(deps.db, r.chat_jid);
       return deps.avisar(previa(r.id, contato ? repo.nomeDe(contato) : r.chat_jid, novo));
     }
@@ -185,39 +189,76 @@ async function mostrarPerfil(deps: DepsControle): Promise<string> {
   return partes.filter(Boolean).join("\n\n") + "\n\n_esquece N apaga uma regra ou lição_";
 }
 
+/**
+ * O rascunho a que o comando se refere. Sem número, só vale se houver um aguardando:
+ * a autonomia cria rascunhos sozinha, e um "ok" pensado para a prévia que o dono leu
+ * não pode mandar outro que chegou segundos antes.
+ */
+async function rascunhoDoComando(deps: DepsControle, id?: number): Promise<repo.Rascunho | null> {
+  if (id !== undefined) {
+    const r = await repo.lerRascunho(deps.db, id);
+    if (r?.status === "aguardando") return r;
+    await deps.avisar("Não há rascunho aguardando com esse número.");
+    return null;
+  }
+  const abertos = await repo.rascunhosAguardando(deps.db, 6);
+  if (abertos.length === 1) return abertos[0];
+  await deps.avisar(
+    abertos.length
+      ? `Há ${abertos.length > 5 ? "mais de 5" : abertos.length} rascunhos aguardando: diga o número (${abertos
+          .slice(0, 5)
+          .map((r) => `#${r.id}`)
+          .join(", ")}).`
+      : "Não há rascunho aguardando.",
+  );
+  return null;
+}
+
 async function enviarRascunho(deps: DepsControle, id?: number): Promise<void> {
-  const r = await repo.lerRascunho(deps.db, id);
-  if (!r || r.status !== "aguardando") return deps.avisar("Não há rascunho aguardando com esse número.");
+  const r = await rascunhoDoComando(deps, id);
+  if (!r) return;
   if (/\[preencher:/i.test(r.texto)) {
     return deps.avisar(`O rascunho #${r.id} ainda tem [preencher: …]. Ajuste antes de enviar.`);
   }
-  await executarEnvio(deps, r);
+  if (!(await executarEnvio(deps, r))) {
+    const agora = await repo.lerRascunho(deps.db, r.id);
+    if (agora?.status !== "aguardando") await deps.avisar(`O #${r.id} já tinha sido decidido.`);
+  }
 }
 
 /**
- * Envia um rascunho que já pode sair (pelo ok do dono, ou pela autonomia que ele deu).
- * É o único lugar do código que manda mensagem a um contato.
+ * Envia um rascunho que já pode sair (pelo ok do dono, ou pela autonomia que ele deu,
+ * com `auto`). É o único lugar do código que manda mensagem a um contato.
  */
 export async function executarEnvio(
   deps: Pick<DepsControle, "db" | "evolution" | "avisar">,
   r: repo.Rascunho,
   sufixo = "",
+  auto?: repo.EnvioAutomatico,
 ): Promise<boolean> {
-  // Marca antes de enviar: um segundo "ok" que chegue no meio não manda de novo.
-  if (!(await repo.decidirRascunho(deps.db, r.id, "enviado"))) return false;
+  // Reserva antes de enviar, e envia o texto que a reserva devolveu (o atual, não o
+  // lido antes): um segundo "ok", um veto ou um ajuste no meio não escapam.
+  const reservado = await repo.reservarEnvio(deps.db, r.id, auto);
+  if (!reservado) return false;
   try {
     // Volta pelo webhook como mensagem "de mim" na conversa do contato, e é gravada
-    // ali como qualquer outra: entra no contexto e nos exemplos de estilo.
-    const mensagemId = await deps.evolution.enviarTexto(r.chat_jid, r.texto);
+    // ali como qualquer outra: entra no contexto da conversa.
+    const mensagemId = await deps.evolution.enviarTexto(reservado.chat_jid, reservado.texto);
     // O id separa esta mensagem das que ele escreveu à mão: só as dele ensinam estilo.
     if (mensagemId) await deps.db.query("UPDATE rascunhos SET mensagem_id = $2 WHERE id = $1", [r.id, mensagemId]);
   } catch (err) {
     await deps.db.query("UPDATE rascunhos SET status = 'aguardando', decidido_em = NULL, enviar_em = NULL WHERE id = $1", [r.id]);
-    await deps.avisar(`Não consegui enviar o #${r.id}: ${String(err).slice(0, 200)}`);
+    // Sem resposta a tempo, a mensagem pode ter saído: o dono confere antes de repetir.
+    const talvez = err instanceof Error && err.name === "TimeoutError";
+    await deps.avisar(
+      talvez
+        ? `O WhatsApp não respondeu a tempo no #${r.id}: a mensagem pode ter saído. Confira a conversa antes de mandar ok ${r.id} de novo.`
+        : `Não consegui enviar o #${r.id}: ${String(err).slice(0, 200)}`,
+    );
     return false;
   }
-  const contato = await repo.lerContato(deps.db, r.chat_jid);
-  await deps.avisar(`Enviado para ${contato ? repo.nomeDe(contato) : r.chat_jid} ✅${sufixo}`);
+  const contato = await repo.lerContato(deps.db, reservado.chat_jid);
+  await deps.avisar(`Enviado para ${contato ? repo.nomeDe(contato) : reservado.chat_jid} ✅${sufixo}`);
   return true;
 }
 
@@ -352,7 +393,16 @@ async function atenderPedido(deps: DepsControle, texto: string): Promise<void> {
     ferramentas,
     mcp: deps.koreos ? { nome: "koreos", ...deps.koreos } : undefined,
   });
-  if (resposta) await deps.avisar(resposta);
+  await deps.avisar(resposta || "Não consegui concluir isso. Tente pedir de outro jeito ou em partes.");
+}
+
+/**
+ * O jid que o agente mandou, como está guardado: LID vira o número, e conversa que o
+ * dono tirou do assistente não existe para o agente.
+ */
+async function conversaDoAgente(db: Db, jid: string): Promise<repo.Contato | null> {
+  const c = await repo.lerContato(db, await repo.resolverJid(db, jid));
+  return c && !c.excluido ? c : null;
 }
 
 export function criarFerramentas(deps: DepsControle) {
@@ -379,9 +429,9 @@ export function criarFerramentas(deps: DepsControle) {
       description: "Lê as últimas mensagens de uma conversa (pelo jid).",
       inputSchema: z.object({ jid: z.string(), quantidade: z.number().int().min(1).max(80).default(40) }),
       run: async ({ jid, quantidade }) => {
-        const contato = await repo.lerContato(db, jid);
-        if (!contato || contato.excluido) return "Conversa não encontrada.";
-        const msgs = await repo.ultimasMensagens(db, jid, quantidade);
+        const contato = await conversaDoAgente(db, jid);
+        if (!contato) return "Conversa não encontrada.";
+        const msgs = await repo.ultimasMensagens(db, contato.jid, quantidade);
         return msgs.length ? linhas(msgs, dono, repo.nomeDe(contato), fuso) : "Sem mensagens guardadas.";
       },
     }),
@@ -420,9 +470,11 @@ export function criarFerramentas(deps: DepsControle) {
         responsavel: z.enum(["eu", "contato", "ambos"]),
       }),
       run: async ({ jid, descricao, quando, responsavel }) => {
+        const contato = await conversaDoAgente(db, jid);
+        if (!contato) return "Conversa não encontrada: ache o jid com buscar_contato.";
         const d = quando ? new Date(quando) : null;
         const id = await repo.criarCompromisso(db, {
-          chatJid: jid,
+          chatJid: contato.jid,
           descricao,
           quando: d && !Number.isNaN(d.getTime()) ? d : null,
           responsavel,
@@ -437,7 +489,9 @@ export function criarFerramentas(deps: DepsControle) {
       description: "Guarda um fato duradouro sobre um contato (ex.: 'filha se chama Ana').",
       inputSchema: z.object({ jid: z.string(), fato: z.string() }),
       run: async ({ jid, fato }) => {
-        await repo.lembrar(db, jid, [fato]);
+        const contato = await conversaDoAgente(db, jid);
+        if (!contato) return "Conversa não encontrada: ache o jid com buscar_contato.";
+        await repo.lembrar(db, contato.jid, [fato]);
         return "Guardado.";
       },
     }),
@@ -459,7 +513,9 @@ export function criarFerramentas(deps: DepsControle) {
         instrucao: z.string().describe("O que a resposta deve dizer, nas palavras do dono"),
       }),
       run: async ({ jid, instrucao }) => {
-        const id = await proporResposta(deps, jid, instrucao);
+        const contato = await conversaDoAgente(db, jid);
+        if (!contato) return "Conversa não encontrada: ache o jid com buscar_contato.";
+        const id = await proporResposta(deps, contato.jid, instrucao);
         return `Rascunho #${id} enviado para aprovação.`;
       },
     }),
