@@ -45,6 +45,8 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
 - Aprende com as suas correções de leitura: cada `errado N` (ou "isso está errado" no chat)
   corrige o item e vira uma lição geral que vai em toda leitura seguinte. Elas aparecem em
   `perfil` e saem com `esquece N`.
+- **Ficou para trás**: quem espera você há 3 dias ou mais (a ligação prometida que não saiu)
+  tem seção própria no resumo e no cartão, do mais antigo para o mais novo, com quantos dias.
 - O resumo traz o KoreOS: suas tarefas que vencem hoje ou estão atrasadas e as contas do dia,
   lidas direto pelo MCP, sem passar pelo Claude.
 - Contato sem nome aparece pelo que se sabe dele, nunca como número de LID. Os nomes da agenda

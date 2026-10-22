@@ -209,3 +209,26 @@ describe("KoreOS direto, sem modelo", () => {
     expect(lerComando("errado #3")).toEqual({ tipo: "errado", id: 3, texto: "" });
   });
 });
+
+describe("ficou para trás", () => {
+  it("quem espera há 3 dias ou mais sai em seção própria, do mais antigo, no texto e no cartão", async () => {
+    const dia = diaVazio();
+    const dias = (n: number) => new Date(dia.agora.getTime() - n * 86400_000);
+    dia.esperando = [
+      { jid: "a@s.whatsapp.net", nome: "Ana", ultima: "e aí?", quando: dias(1), situacao: "Ela perguntou do orçamento." },
+      { jid: "b@s.whatsapp.net", nome: "Bruno Lima", ultima: "me liga quando puder", quando: dias(9), situacao: "Você ficou de ligar para o Bruno." },
+      { jid: "c@s.whatsapp.net", nome: "Carla", ultima: "?", quando: dias(4), situacao: "" },
+    ];
+    const { texto } = resumoEmTexto(dia, "Lucas", SP);
+    expect(texto).toMatch(/\*Ficou para trás\*\n• \*Bruno Lima\* \(há 9 dias\): Você ficou de ligar para o Bruno\.\n• \*Carla\* \(há 4 dias\)/);
+    expect(texto).toMatch(/\*Esperando resposta sua\*\n• \*Ana\*/);
+    expect(texto.match(/Bruno Lima/g)).toHaveLength(1);
+
+    // No cartão, o modelo nem recebe quem ficou para trás: a seção é montada dos dados.
+    let itens = "";
+    const ia = { estruturar: async (_s: unknown, p: { conteudo: string }) => ((itens = p.conteudo), null) } as any;
+    await planoDoCartao(ia, dia, "Lucas", SP);
+    expect(itens).toMatch(/Ana/);
+    expect(itens).not.toMatch(/Bruno|Carla/);
+  });
+});

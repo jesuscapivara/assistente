@@ -18,6 +18,7 @@ const dia: Dia = {
   semData: [],
   esperando: [
     { jid: "y", nome: "Ana Ribeiro", ultima: "Sábado eu estaria um pouco mais livre", quando: em(-10), situacao: "Você convidou a Ana para visitar a obra; ela respondeu que sábado está mais livre — falta você propor o horário." },
+    { jid: "w", nome: "Bruno Lima", ultima: "me liga quando puder", quando: em(-7 * 24), situacao: "Bruno está ajudando com o certificado digital e pediu que você ligue quando puder." },
   ],
   datas: [{ jid: "z", nome: "Carla Mendes", descricao: "aniversário", mes: 10, dia: 23, faltam: 1 }],
   emails: [],

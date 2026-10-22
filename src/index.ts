@@ -15,7 +15,7 @@ import { ingerir } from "./ingestao.js";
 import { comandoDoPainel, paginaDoPainel } from "./painel.js";
 import { briefings, cobrancas, fimDoDia, revisaoSemanal } from "./proativo.js";
 import * as repo from "./repo.js";
-import { coletarDia, resumoEmTexto } from "./resumo.js";
+import { assuntoDe, coletarDia, diasEsperando, ficouParaTras, resumoEmTexto } from "./resumo.js";
 import { criarServidor } from "./server.js";
 import { transcrever } from "./transcricao.js";
 import { criarEvolution } from "./whatsapp/evolution.js";
@@ -81,6 +81,7 @@ async function enviarResumo(): Promise<void> {
         `[cartão do resumo] ${plano.manchete}`,
         ...plano.atos.map((a) => `${a.faixa}: ${a.frase}`),
         ...plano.precisa.map((p, i) => `Precisa de você ${i + 1}. ${p.titulo} — ${p.frase}`),
+        ...ficouParaTras(dia).slice(0, 5).map((e, i) => `Ficou para trás ${i + 1}. ${e.nome} (há ${diasEsperando(e, dia.agora)} dias) — ${assuntoDe(e)}`),
         ...plano.resolvido.map((p, i) => `Resolvido ${i + 1}. ${p.frase}`),
       ].join("\n");
       await repo.registrarFala(db, "assistente", `${cartao}\n\n${texto}`, refs).catch(() => undefined);

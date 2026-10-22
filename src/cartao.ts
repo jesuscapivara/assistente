@@ -7,7 +7,7 @@ import { z } from "zod";
 import { dataCurta, relogio } from "./formato.js";
 import type { Ia } from "./ia.js";
 import { diaMes } from "./koreos.js";
-import { diaPorExtenso, remetente, type Dia } from "./resumo.js";
+import { assuntoDe, diaPorExtenso, diasEsperando, esperandoRecente, ficouParaTras, remetente, type Dia } from "./resumo.js";
 
 /**
  * O resumo da manhã como imagem, no desenho do "morning brief" do Claude: no alto, o
@@ -62,7 +62,8 @@ function itensComRef(dia: Dia, fuso: string): { texto: string; refs: Map<string,
     add(`#${c.id}`, `${quem} ${dataCurta(new Date(c.quando!), fuso)} ${c.descricao} — ${c.contato_nome ?? "?"}${atrasado}`);
   }
   for (const c of dia.semData) add(`#${c.id}`, `[promessa sem data] ${c.descricao} — ${c.contato_nome ?? "?"}`);
-  dia.esperando.forEach((e, i) =>
+  // Quem ficou para trás tem seção própria no cartão, montada dos dados: aqui só os recentes.
+  esperandoRecente(dia).forEach((e, i) =>
     add(`W${i + 1}`, `[WhatsApp, espera resposta desde ${dataCurta(new Date(e.quando), fuso)}] ${e.nome}: ${e.situacao || `"${e.ultima.slice(0, 160)}"`}`),
   );
   dia.emails.forEach((e, i) => add(`M${i + 1}`, `[e-mail não lido] de ${remetente(e.de)}: ${e.assunto} — ${e.trecho.slice(0, 160)}`));
@@ -101,7 +102,7 @@ function planoSemModelo(dia: Dia, dono: string, fuso: string): Plano {
     ...((dia.koreos?.tarefasAtrasadas.length ?? 0) > 0
       ? [{ ref: "TA1", titulo: dia.koreos!.tarefasAtrasadas.length === 1 ? "1 tarefa atrasada no KoreOS" : `${dia.koreos!.tarefasAtrasadas.length} tarefas atrasadas no KoreOS`, frase: dia.koreos!.tarefasAtrasadas.slice(0, 3).map((t) => `${t.titulo} (${t.projeto})`).join("; ") + "." }]
       : []),
-    ...dia.esperando.map((e, i) => ({ ref: `W${i + 1}`, titulo: `${e.nome} espera resposta`, frase: e.situacao || `"${e.ultima.slice(0, 120)}"` })),
+    ...esperandoRecente(dia).map((e, i) => ({ ref: `W${i + 1}`, titulo: `${e.nome} espera resposta`, frase: e.situacao || `"${e.ultima.slice(0, 120)}"` })),
   ].slice(0, 6);
   const resolvido = dia.resolvidos.slice(0, 4).map((r, i) => ({ ref: `R${i + 1}`, frase: `${r.descricao} — ${r.contato}.` }));
   return { manchete, atos, precisa, resolvido };
@@ -252,7 +253,8 @@ async function carregarFontes() {
 /** O cartão em PNG (960 px de largura, altura conforme o conteúdo, 2x para nitidez). */
 export async function desenharCartao(dia: Dia, plano: Plano, fuso: string): Promise<Buffer> {
   const desenho = `data:image/svg+xml;base64,${Buffer.from(relevo(dia, fuso)).toString("base64")}`;
-  const nada = !plano.precisa.length && !plano.resolvido.length;
+  const paraTras = ficouParaTras(dia).slice(0, 5);
+  const nada = !plano.precisa.length && !plano.resolvido.length && !paraTras.length;
   const arvore = h(
     "div",
     { flexDirection: "column", width: 960, backgroundColor: COR.fundo, fontFamily: "Inter" },
@@ -288,6 +290,12 @@ export async function desenharCartao(dia: Dia, plano: Plano, fuso: string): Prom
         ? h("div", { fontSize: 17, color: COR.tintaSuave, marginTop: 34 }, "Nada precisa de você esta manhã.")
         : null,
       plano.precisa.length ? lista("Precisa de você", plano.precisa) : null,
+      paraTras.length
+        ? lista(
+            "Ficou para trás",
+            paraTras.map((e) => ({ titulo: e.nome, frase: `Há ${diasEsperando(e, dia.agora)} dias. ${assuntoDe(e)}` })),
+          )
+        : null,
       plano.resolvido.length ? lista("Resolvido", plano.resolvido) : null,
     ),
   );

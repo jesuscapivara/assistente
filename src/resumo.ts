@@ -87,8 +87,34 @@ export async function coletarDia(deps: DepsResumo, agora = new Date()): Promise<
 
 /** Quem espera, com o que se sabe: a situação da conversa diz mais que a última frase. */
 export function linhaDeEspera(e: Dia["esperando"][number], fuso: string): string {
-  const assunto = e.situacao && e.situacao !== "nada em andamento" ? e.situacao : `"${e.ultima.slice(0, 120)}"`;
-  return `• *${e.nome}* (${dataCurta(new Date(e.quando), fuso)}): ${assunto}`;
+  return `• *${e.nome}* (${dataCurta(new Date(e.quando), fuso)}): ${assuntoDe(e)}`;
+}
+
+export function assuntoDe(e: Dia["esperando"][number]): string {
+  return e.situacao && e.situacao !== "nada em andamento" ? e.situacao : `"${e.ultima.slice(0, 120)}"`;
+}
+
+/**
+ * A partir de quantos dias sem resposta a pessoa "ficou para trás". É o lembrete que o
+ * Lucas mais valorizou (22/10/2026: a ligação para alguém que ele prometeu fazer uma
+ * semana antes): sai sempre, em seção própria, montado dos dados e não da escolha do modelo.
+ */
+export const DIAS_PARA_TRAS = 3;
+
+export function diasEsperando(e: { quando: Date }, agora: Date): number {
+  return Math.floor((agora.getTime() - new Date(e.quando).getTime()) / 86400_000);
+}
+
+/** Quem espera há `DIAS_PARA_TRAS` dias ou mais, do mais antigo para o mais novo. */
+export function ficouParaTras(dia: Pick<Dia, "esperando" | "agora">): Dia["esperando"] {
+  return dia.esperando
+    .filter((e) => diasEsperando(e, dia.agora) >= DIAS_PARA_TRAS)
+    .sort((a, b) => new Date(a.quando).getTime() - new Date(b.quando).getTime());
+}
+
+/** Quem espera há menos tempo: o resto da lista. */
+export function esperandoRecente(dia: Pick<Dia, "esperando" | "agora">): Dia["esperando"] {
+  return dia.esperando.filter((e) => diasEsperando(e, dia.agora) < DIAS_PARA_TRAS);
 }
 
 /**
@@ -124,7 +150,12 @@ export function resumoEmTexto(dia: Dia, dono: string, fuso: string): { texto: st
   if (dia.semData.length) {
     blocos.push("*Promessas sem data*\n" + dia.semData.map((c) => `#${c.id} ${c.descricao} (${c.contato_nome ?? "?"})`).join("\n"));
   }
-  if (dia.esperando.length) blocos.push("*Esperando resposta sua*\n" + dia.esperando.map((e) => linhaDeEspera(e, fuso)).join("\n"));
+  const paraTras = ficouParaTras(dia);
+  if (paraTras.length) {
+    blocos.push("*Ficou para trás*\n" + paraTras.map((e) => `• *${e.nome}* (há ${diasEsperando(e, agora)} dias): ${assuntoDe(e)}`).join("\n"));
+  }
+  const recentes = esperandoRecente(dia);
+  if (recentes.length) blocos.push("*Esperando resposta sua*\n" + recentes.map((e) => linhaDeEspera(e, fuso)).join("\n"));
   const k = dia.koreos;
   if (k && (k.tarefasHoje.length || k.tarefasAtrasadas.length || k.contasHoje.length || k.contasAtrasadas.length)) {
     blocos.push(
