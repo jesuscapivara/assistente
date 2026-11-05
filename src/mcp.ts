@@ -3,6 +3,7 @@ import { z } from "zod";
 import { executarEnvio } from "./controle.js";
 import type { Db } from "./db.js";
 import { dataComAno } from "./formato.js";
+import { adicionarInteresse, descreverInteresse, lerValor, listarInteresses, removerInteresse, textoDosInteresses, ultimasOfertas } from "./ofertas.js";
 import * as repo from "./repo.js";
 import type { Evolution } from "./whatsapp/evolution.js";
 
@@ -58,6 +59,8 @@ interface Ferramenta<T extends z.ZodType> {
   entrada: T;
   /** Escreve fora do assistente (envia ou cria): só aparece com `envio`. */
   envia?: boolean;
+  /** Muda o que o assistente guarda (interesses, grupo de promoção): também só com `envio`. */
+  escreve?: boolean;
   rodar(args: z.infer<T>, deps: DepsMcp): Promise<string>;
 }
 
@@ -215,6 +218,52 @@ const FERRAMENTAS = [
     },
   }),
   ferramenta({
+    nome: "interesses",
+    descricao: "Lista os interesses de compra do dono (o assistente avisa quando uma oferta dos grupos de promoção bate), os grupos de promoção vigiados e as últimas ofertas que bateram.",
+    entrada: z.object({}),
+    async rodar(_args, { db }) {
+      return textoDosInteresses(await listarInteresses(db), await repo.gruposDePromo(db), await ultimasOfertas(db, 10)).replace(/\*/g, "");
+    },
+  }),
+  ferramenta({
+    nome: "adicionar_interesse",
+    descricao: "Anota um interesse de compra: o assistente avisa o dono quando sair nos grupos de promoção uma oferta com todas as palavras (\"-palavra\" exclui) e, se houver teto, até esse preço.",
+    escreve: true,
+    entrada: z.object({
+      termos: z.string().min(1).max(200).describe("palavras que precisam aparecer, ex.: \"monitor 27 144hz\" ou \"drone dji -mini\""),
+      preco_max: z.union([z.number().positive(), z.string().min(1)]).optional().describe("teto em reais, ex.: 900 ou \"1.299,90\""),
+    }),
+    async rodar({ termos, preco_max }, { db }) {
+      const teto = preco_max === undefined ? null : typeof preco_max === "number" ? preco_max : lerValor(preco_max);
+      if (preco_max !== undefined && teto === null) return `Não entendi o preço "${preco_max}".`;
+      const id = await adicionarInteresse(db, termos, teto);
+      return `Anotado: ${descreverInteresse({ id, termos: termos.trim(), preco_max: teto })}.`;
+    },
+  }),
+  ferramenta({
+    nome: "remover_interesse",
+    descricao: "Apaga um interesse de compra pelo #id (veja em interesses).",
+    escreve: true,
+    entrada: z.object({ id: z.number().int().positive() }),
+    async rodar({ id }, { db }) {
+      return (await removerInteresse(db, id)) ? `Interesse #${id} apagado.` : `Não há interesse #${id}.`;
+    },
+  }),
+  ferramenta({
+    nome: "marcar_promocao",
+    descricao: "Marca um grupo como grupo de promoção: apaga o que o assistente guardava dele, não grava mais as mensagens e passa a comparar cada oferta com os interesses do dono. Sem confirmar, só mostra o grupo; com confirmar: true, marca.",
+    escreve: true,
+    entrada: z.object({ grupo: z.string().min(1).describe("nome ou jid do grupo"), confirmar: z.boolean().default(false) }),
+    async rodar({ grupo, confirmar }, deps) {
+      const c = await acharConversa(deps.db, grupo);
+      if (typeof c === "string") return c;
+      if (!c.grupo) return `${repo.nomeDe(c)} não é grupo.`;
+      if (!confirmar) return `Grupo: ${repo.nomeDe(c)} [${c.jid}]. O que o assistente guardou dele será apagado. Confirme com o dono e chame com confirmar: true.`;
+      await repo.marcarPromo(deps.db, c.jid);
+      return `${repo.nomeDe(c)} agora é grupo de promoção.`;
+    },
+  }),
+  ferramenta({
     nome: "preparar_mensagem",
     descricao: "Grava o rascunho de uma mensagem do dono para uma pessoa ou grupo do WhatsApp, sem enviar. Devolve o #id, o destino e o texto, para mostrar ao dono antes de enviar_rascunho.",
     envia: true,
@@ -276,7 +325,7 @@ const FERRAMENTAS = [
 
 /** As de envio só existem quando o servidor recebeu como enviar. */
 function disponiveis(deps: DepsMcp) {
-  return FERRAMENTAS.filter((f) => !f.envia || deps.envio);
+  return FERRAMENTAS.filter((f) => !(f.envia || f.escreve) || deps.envio);
 }
 
 type Pedido = { jsonrpc?: string; id?: string | number | null; method?: string; params?: any };
@@ -311,7 +360,11 @@ export async function tratarMcp(p: Pedido, deps: DepsMcp): Promise<object | null
           name: f.nome,
           description: f.descricao,
           inputSchema: z.toJSONSchema(f.entrada, { io: "input" }),
-          annotations: f.envia ? { readOnlyHint: false, destructiveHint: false, openWorldHint: true } : { readOnlyHint: true, openWorldHint: false },
+          annotations: f.envia
+            ? { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
+            : f.escreve
+              ? { readOnlyHint: false, destructiveHint: f.nome === "marcar_promocao", openWorldHint: false }
+              : { readOnlyHint: true, openWorldHint: false },
         })),
       });
     case "tools/call": {

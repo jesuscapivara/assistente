@@ -27,6 +27,9 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
   KoreOS (pergunta antes de alterar algo lá).
 
 **É proativo**
+- 🛒 Ofertas: nos grupos marcados com `promo`, cada mensagem é comparada com a sua lista de
+  interesses, por regra (palavras e preço, sem modelo, sem gravar a mensagem). Bateu, chega o
+  aviso; a mesma oferta repostada em outro grupo não avisa de novo.
 - ⚡ Urgência na hora (prazo para hoje, problema, cliente insatisfeito).
 - 📅 Briefing antes de cada reunião: quem é, onde a conversa parou, o que está combinado.
 - ☀️ Resumo da manhã (07:30) **em imagem**: o dia desenhado como relevo (a altura é a carga de
@@ -86,6 +89,8 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `perfil` · `regra nunca marco nada antes das 9` · `esquece 4` | o que ele sabe de você |
 | `estuda` | atualiza agora as fichas e o seu retrato |
 | `fora Grupo da Família` · `volta Grupo da Família` | tira (e apaga) ou devolve uma conversa |
+| `promo Emipe Promoções` | grupo de promoção: sai do assistente (como o `fora`), mas cada oferta passa pelos seus interesses |
+| `interesse monitor 27 até 900` · `interesses` · `esquece interesse 2` | avisa quando sair oferta com todas as palavras (`-palavra` exclui) e até o teto; a lista mostra os grupos vigiados e o que já bateu |
 | `resolvi B` · `adia B sábado` · `ignora B` · `responde B <o quê>` · `cobra B` | pelas letras do último resumo (cartão ou texto). `resolvi` é para o que você resolveu por fora (ligação, pessoalmente), que o WhatsApp não vê; `adia` aceita amanhã, sábado, 3 dias, 25/10, e a pessoa volta antes se escrever; `ignora` tira e ensina que aquilo não pedia resposta. Frase livre também vale: "já liguei pro Bruno" |
 | `errado 1 quem vai ler é ele` | corrige o compromisso 1 e aprende para as próximas leituras; para o resto, diga com suas palavras ("a Thaís é notificação do KoreOS") |
 | `custo` | gasto com o Claude hoje, em 7 e em 30 dias, e por função |
@@ -168,7 +173,8 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   `buscar_contato`, `ler_conversa` (com `ate` para voltar no tempo e `desde` para ler só o
   novo), `buscar_mensagens`, `conversas_recentes` (por dias ou `desde`), `novidades` (tudo que
   chegou depois de um instante, por conversa, numa chamada: é o que atualiza as anotações do
-  Claude Code sem ler conversa por conversa) e `pendencias`; conversa tirada com `fora` não aparece. Desde a 1.13.0
+  Claude Code sem ler conversa por conversa) e `pendencias`; conversa tirada com `fora` não aparece. Com envio ligado, também `adicionar_interesse`,
+  `remover_interesse` e `marcar_promocao` (pede `confirmar: true`); `interesses` lista. Desde a 1.13.0
   também envia, em dois passos: `preparar_mensagem` grava um rascunho (que chega no seu canal,
   onde vale `ok`/veto) e `enviar_rascunho` manda depois do seu sim na sessão; `criar_grupo`
   só cria com `confirmar: true`. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo

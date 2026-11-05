@@ -7,6 +7,7 @@ import { registrarUso } from "./consumo.js";
 import { depsDaPauta, NIVEIS, responderPedido, tratarComando, type DepsControle } from "./controle.js";
 import { corrigirLeitura } from "./corrigir.js";
 import { atualizarCaderno, limparCaderno } from "./memoria.js";
+import { avaliarOferta } from "./ofertas.js";
 import { proporResposta } from "./rascunho.js";
 import { abrirDb, gravarEstado, migrar } from "./db.js";
 import { relogio } from "./formato.js";
@@ -214,6 +215,10 @@ const app = criarServidor({
       aoImagem: async (msg) => {
         const d = await ia.verImagem(await evolution.baixarMidia(msg.bruto), msg.texto);
         if (d) await db.query("UPDATE mensagens SET texto = $2 WHERE id = $1", [msg.id, `[foto: ${d}]${msg.texto ? ` ${msg.texto}` : ""}`]);
+      },
+      aoOferta: async (jid, grupo, texto) => {
+        const aviso = await avaliarOferta(db, jid, grupo, texto);
+        if (aviso) await avisar(aviso);
       },
       aoHistorico: async (n) => agendarEstudoDoHistorico(n),
       log,

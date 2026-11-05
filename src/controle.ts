@@ -1,3 +1,4 @@
+import { adicionarInteresse, descreverInteresse, lerInteresse, listarInteresses, removerInteresse, textoDosInteresses, ultimasOfertas } from "./ofertas.js";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { gravarEstado, lerEstado, type Db } from "./db.js";
@@ -53,6 +54,10 @@ export type Comando =
   | { tipo: "compromisso"; acao: "confirmado" | "feito" | "descartado"; id: number }
   | { tipo: "excluir"; nome: string }
   | { tipo: "incluir"; nome: string }
+  | { tipo: "promo"; nome: string }
+  | { tipo: "interesse"; termos: string; preco_max: number | null }
+  | { tipo: "interesses" }
+  | { tipo: "esquecerInteresse"; id: number }
   | { tipo: "resumo" }
   | { tipo: "perfil" }
   | { tipo: "regra"; texto: string }
@@ -87,6 +92,13 @@ export function lerComando(texto: string): Comando {
   }
   if ((m = t.match(/^(fora|exclui|excluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "excluir", nome: m[2].trim() };
   if ((m = t.match(/^(volta|inclui|incluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "incluir", nome: m[2].trim() };
+  if ((m = t.match(/^promo(?:[çc][ãa]o)?\s+(.+)$/i)) && pareceNome(m[1])) return { tipo: "promo", nome: m[1].trim() };
+  if (/^(interesses|meus interesses|ofertas)[.!?]?$/i.test(t)) return { tipo: "interesses" };
+  if ((m = t.match(/^esquece\s+(?:o\s+)?interesse\s+#?(\d+)[.!]?$/i))) return { tipo: "esquecerInteresse", id: Number(m[1]) };
+  if ((m = t.match(/^interesse[\s:,-]+([\s\S]+)$/i))) {
+    const i = lerInteresse(m[1]);
+    if (i) return { tipo: "interesse", ...i };
+  }
   if (/^(resumo|bom dia)[.!]?$/i.test(t)) return { tipo: "resumo" };
   if (/^(perfil|meu perfil)[.!?]?$/i.test(t)) return { tipo: "perfil" };
   if ((m = t.match(/^regra[\s:,-]+([\s\S]+)$/i))) return { tipo: "regra", texto: m[1].trim() };
@@ -143,6 +155,9 @@ const AJUDA = `*Comandos*
 • confirma N · feito N · ignora N — compromissos
 • fora <nome> — tira a conversa ou o grupo do assistente (e apaga o que já tinha)
 • volta <nome> — põe de volta
+• promo <grupo> — grupo de promoção: sai do assistente, mas as ofertas passam pelos seus interesses
+• interesse <palavras> até <valor> — me avisa quando sair oferta assim ("interesse monitor 27 até 900"; "-palavra" exclui)
+• interesses — a lista, os grupos vigiados e as últimas ofertas · esquece interesse N
 • resumo
 • perfil — o que eu sei de você
 • regra <texto> — uma regra sua ("regra nunca marco nada antes das 9")
@@ -209,6 +224,16 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
     case "excluir":
     case "incluir":
       return alternarChat(deps, c.nome, c.tipo === "excluir");
+    case "promo":
+      return marcarGrupoDePromo(deps, c.nome);
+    case "interesse": {
+      const id = await adicionarInteresse(deps.db, c.termos, c.preco_max);
+      return deps.avisar(`Anotado: ${descreverInteresse({ id, termos: c.termos, preco_max: c.preco_max })}. Aviso quando sair nos grupos de promoção.`);
+    }
+    case "interesses":
+      return deps.avisar(textoDosInteresses(await listarInteresses(deps.db), await repo.gruposDePromo(deps.db), await ultimasOfertas(deps.db)));
+    case "esquecerInteresse":
+      return deps.avisar((await removerInteresse(deps.db, c.id)) ? `Interesse #${c.id} apagado.` : `Não há interesse #${c.id}.`);
     case "resumo": {
       if (deps.enviarResumo) return deps.enviarResumo();
       const r = await montarResumo(deps);
@@ -469,6 +494,17 @@ async function relatorioAutonomia(deps: DepsControle): Promise<string> {
 /** Dez rascunhos decididos e nove em dez sem ajuste: o assistente já escreve como ele ali. */
 export function sugerirSubir(x: { decididos: number; sem_ajuste: number; autonomia: number | null }): boolean {
   return x.decididos >= 10 && x.sem_ajuste / x.decididos >= 0.9 && (x.autonomia ?? 0) < 3;
+}
+
+/** "promo <grupo>": só grupo, e só um. Apaga o que havia, como o `fora`. */
+async function marcarGrupoDePromo(deps: DepsControle, nome: string): Promise<void> {
+  const achados = (await repo.buscarContatos(deps.db, nome, 5)).filter((c) => c.grupo);
+  if (!achados.length) return deps.avisar(`Não achei grupo "${nome}".`);
+  const exato = achados.filter((c) => repo.nomeDe(c).toLowerCase() === nome.toLowerCase());
+  const alvo = exato.length === 1 ? exato[0] : achados.length === 1 ? achados[0] : null;
+  if (!alvo) return deps.avisar(`Achei mais de um. Mande o nome exato:\n${achados.map((c) => `• ${repo.nomeDe(c)}`).join("\n")}`);
+  await repo.marcarPromo(deps.db, alvo.jid);
+  return deps.avisar(`${repo.nomeDe(alvo)} virou grupo de promoção: não guardo mais as mensagens, só comparo as ofertas com os seus interesses.`);
 }
 
 async function alternarChat(deps: DepsControle, nome: string, excluir: boolean): Promise<void> {

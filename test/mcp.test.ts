@@ -74,7 +74,7 @@ describe("protocolo do MCP", () => {
     expect((await chamar(app, { jsonrpc: "2.0", method: "notifications/initialized" })).statusCode).toBe(202);
 
     const lista = (await chamar(app, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
-    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "ler_conversa", "novidades", "pendencias"]);
+    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "interesses", "ler_conversa", "novidades", "pendencias"]);
     expect(lista.every((t: any) => t.annotations.readOnlyHint && t.inputSchema.type === "object")).toBe(true);
     // Nada que envie: o envio só sai por executarEnvio, com as travas.
     expect(lista.some((t: any) => /envi|respond|propor/.test(t.name))).toBe(false);
@@ -84,7 +84,7 @@ describe("protocolo do MCP", () => {
     const comEnvio = servidor({} as Db, new EnvioFalso());
     const lista = (await chamar(comEnvio, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
     const envio = lista.filter((t: any) => !t.annotations.readOnlyHint).map((t: any) => t.name).sort();
-    expect(envio).toEqual(["criar_grupo", "enviar_rascunho", "preparar_mensagem"]);
+    expect(envio).toEqual(["adicionar_interesse", "criar_grupo", "enviar_rascunho", "marcar_promocao", "preparar_mensagem", "remover_interesse"]);
     const ini = (await chamar(comEnvio, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).json();
     expect(ini.result.instructions).toMatch(/só depois do sim dele/);
   });

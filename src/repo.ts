@@ -18,10 +18,12 @@ export interface Contato {
   espera_resposta: boolean;
   sistema: boolean;
   sugestoes: string;
+  /** Grupo de promoção: fora do assistente, só passa pelas ofertas. */
+  promo: boolean;
 }
 
 const COLUNAS_CONTATO =
-  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema, sugestoes";
+  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema, sugestoes, promo";
 
 export interface Mensagem {
   id: string;
@@ -256,9 +258,24 @@ export async function lembrar(db: Db, jid: string, fatos: string[], teto = 4000)
   await db.query("UPDATE contatos SET memoria = $2, atualizado_em = now() WHERE jid = $1", [jid, texto]);
 }
 
+/**
+ * Grupo de promoção: sai do assistente como o `fora` (apaga o que havia, não grava mais),
+ * mas as ofertas novas passam pela lista de interesses. `volta` desfaz os dois.
+ */
+export async function marcarPromo(db: Db, jid: string): Promise<void> {
+  await excluirChat(db, jid, true);
+  await db.query("UPDATE contatos SET promo = TRUE WHERE jid = $1", [jid]);
+}
+
+/** Os nomes dos grupos de promoção vigiados. */
+export async function gruposDePromo(db: Db): Promise<string[]> {
+  const r = await db.query<{ nome: string }>(`SELECT ${NOME_SQL} AS nome FROM contatos c WHERE c.promo ORDER BY 1`);
+  return r.rows.map((x) => x.nome);
+}
+
 export async function excluirChat(db: Db, jid: string, excluido: boolean): Promise<void> {
   if (!excluido) {
-    await db.query("UPDATE contatos SET excluido = FALSE, atualizado_em = now() WHERE jid = $1", [jid]);
+    await db.query("UPDATE contatos SET excluido = FALSE, promo = FALSE, atualizado_em = now() WHERE jid = $1", [jid]);
     return;
   }
   // Quem sai do assistente sai por inteiro: texto, ficha, compromissos, datas e os

@@ -13,17 +13,20 @@ export interface DepsIngestao {
   aoAudio?(msg: MensagemRecebida): Promise<void>;
   /** Foto recebida numa conversa individual: descreve em segundo plano, para a leitura e a resposta. */
   aoImagem?(msg: MensagemRecebida): Promise<void>;
+  /** Mensagem de grupo de promoção: não é gravada, só comparada com os interesses do dono. */
+  aoOferta?(chatJid: string, grupo: string, texto: string): Promise<void>;
   /** Histórico gravado: hora de conhecer as pessoas. */
   aoHistorico?(gravadas: number): Promise<void>;
   log?: (o: object, txt: string) => void;
 }
 
-export type Resultado = "ignorado" | "comando" | "excluido" | "repetido" | "gravado" | "historico";
+export type Resultado = "ignorado" | "comando" | "excluido" | "promo" | "repetido" | "gravado" | "historico";
 
 /**
  * Um evento do webhook. Destinos:
  * - histórico (ao parear): grava em lote, já marcado como lido;
  * - canal de controle (chat consigo mesmo, escrito pelo dono): é comando, não conversa;
+ * - grupo de promoção: não grava, só compara a oferta com os interesses do dono;
  * - chat fora do assistente: descarta sem gravar nada;
  * - o resto: grava, e a extração pega depois.
  */
@@ -60,6 +63,10 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
     // Em grupo o PushName é de quem falou, não do grupo.
     nomePush: m.grupo || m.deMim ? null : m.remetenteNome,
   });
+  if (contato.promo && !m.deMim && deps.aoOferta) {
+    await deps.aoOferta(chatJid, repo.nomeDe(contato), m.texto);
+    return "promo";
+  }
   if (contato.excluido) return "excluido";
 
   const texto = m.tipo === "audio" ? "[áudio]" : m.texto;
