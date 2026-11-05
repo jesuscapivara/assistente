@@ -88,6 +88,7 @@ describe.skipIf(!URL_TESTE)("arquivos com banco", () => {
   });
   afterAll(async () => db?.end());
   beforeEach(async () => {
+    seq = 0;
     await db.query("TRUNCATE contatos, mensagens, rascunhos, anexos RESTART IDENTITY CASCADE");
   });
 
