@@ -29,7 +29,9 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
 **É proativo**
 - 🛒 Ofertas: nos grupos marcados com `promo`, cada mensagem é comparada com a sua lista de
   interesses, por regra (palavras e preço, sem modelo, sem gravar a mensagem). Bateu, chega o
-  aviso; a mesma oferta repostada em outro grupo não avisa de novo.
+  aviso; a mesma oferta repostada em outro grupo não avisa de novo. O aviso diz se o preço é
+  o menor que ele já viu para aquele interesse em 90 dias (o histórico guarda até as ofertas
+  acima do teto). "PlayStation 5", "Playstation5" e "PS 5" valem como "ps5".
 - ⚡ Urgência na hora (prazo para hoje, problema, cliente insatisfeito).
 - 📅 Briefing antes de cada reunião: quem é, onde a conversa parou, o que está combinado.
 - ☀️ Resumo da manhã (07:30) **em imagem**: o dia desenhado como relevo (a altura é a carga de

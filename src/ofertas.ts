@@ -18,6 +18,16 @@ export function normalizar(t: string): string {
   return t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+/**
+ * Nomes que as lojas escrevem de jeitos diferentes viram um só, dos dois lados (interesse
+ * e oferta): "PlayStation 5", "Playstation5" e "PS 5" são "ps5".
+ */
+function paraCasar(t: string): string {
+  return normalizar(t)
+    .replace(/play\s*station\s*5/g, "ps5")
+    .replace(/(^|[^a-z0-9])ps\s+5(?![0-9])/g, "$1ps5");
+}
+
 /** Valor em reais escrito pelo dono ou pela oferta: "900", "1.299,90", "1,2 mil", "2k". */
 export function lerValor(t: string): number | null {
   const m = t.trim().toLowerCase().match(/^(?:r\$\s*)?([\d.,]+)\s*(mil|k)?$/);
@@ -46,8 +56,8 @@ export function precos(texto: string): number[] {
  * e "x" com "xbox", que estão em quase toda oferta. Número casa inteiro ("27" não é "270").
  */
 export function casa(termos: string, texto: string): boolean {
-  const t = normalizar(texto);
-  const palavras = normalizar(termos).split(/\s+/).filter(Boolean);
+  const t = paraCasar(texto);
+  const palavras = paraCasar(termos).split(/\s+/).filter(Boolean);
   const tem = (p: string) => {
     const e = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(/^\d+$/.test(p) ? `(^|[^a-z0-9])${e}([^a-z0-9]|$)` : `(^|[^a-z0-9])${e}(s|es)?([^a-z0-9]|$)`).test(t);
@@ -97,19 +107,46 @@ export function lerInteresse(t: string): { termos: string; preco_max: number | n
   return { termos, preco_max: m[3] ? lerValor(m[3]) : null };
 }
 
+/** "12/11": a data curta do menor preço, no fuso do dono. */
+function diaCurto(d: Date, fuso: string): string {
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: fuso });
+}
+
+/**
+ * Como o preço desta oferta se compara com o que o assistente já viu para o mesmo
+ * interesse nos últimos 90 dias. Sem histórico, diz que é o primeiro: a régua se forma
+ * com o tempo.
+ */
+export function comparacao(preco: number | null, anterior: { preco: number; em: Date } | null, teto: number | null, fuso: string): string {
+  const doTeto = teto !== null && preco !== null ? ` · dentro do seu teto de ${reais(teto)}` : "";
+  if (preco === null) return "💬 Sem preço no anúncio: confira na loja.";
+  if (!anterior) return `🆕 Primeiro preço que vejo para isso: ainda não tenho com o que comparar${doTeto}.`;
+  if (preco < anterior.preco) return `📉 *Menor preço que já vi* (antes: ${reais(anterior.preco)} em ${diaCurto(anterior.em, fuso)})${doTeto}.`;
+  if (preco === anterior.preco) return `🟰 Igual ao menor que já vi (${diaCurto(anterior.em, fuso)})${doTeto}.`;
+  return `📈 ${reais(preco - anterior.preco)} acima do menor que já vi (${reais(anterior.preco)} em ${diaCurto(anterior.em, fuso)})${doTeto}.`;
+}
+
 /**
  * Uma mensagem de grupo de promoção. Devolve o aviso a mandar ao dono, ou null se nada
- * bateu (ou se já avisou essa oferta para esse interesse).
+ * bateu (ou se já avisou essa oferta para esse interesse). Todo preço que casa vai para o
+ * histórico, mesmo acima do teto: é ele que diz depois se uma oferta está boa.
  */
-export async function avaliarOferta(db: Db, chatJid: string, grupo: string, texto: string): Promise<string | null> {
+export async function avaliarOferta(db: Db, chatJid: string, grupo: string, texto: string, fuso = "America/Sao_Paulo"): Promise<string | null> {
   if (!texto.trim()) return null;
   const interesses = await listarInteresses(db);
   if (!interesses.length) return null;
   const valores = precos(texto);
   const menor = valores.length ? Math.min(...valores) : null;
-  const bateram: Interesse[] = [];
+  const bateram: { i: Interesse; linha: string }[] = [];
   for (const i of interesses) {
     if (!casa(i.termos, texto)) continue;
+    const h = await db.query<{ preco: string; visto_em: Date }>(
+      `SELECT preco, visto_em FROM precos_vistos WHERE interesse_id = $1 AND visto_em > now() - interval '90 days'
+       ORDER BY preco, visto_em LIMIT 1`,
+      [i.id],
+    );
+    const anterior = h.rows[0] ? { preco: Number(h.rows[0].preco), em: h.rows[0].visto_em } : null;
+    if (menor !== null) await db.query("INSERT INTO precos_vistos (interesse_id, preco) VALUES ($1, $2)", [i.id, menor]);
     // Sem preço na oferta, avisa assim mesmo: o teto não tem como ser conferido.
     if (i.preco_max !== null && menor !== null && menor > i.preco_max) continue;
     const nova = await db.query(
@@ -117,11 +154,13 @@ export async function avaliarOferta(db: Db, chatJid: string, grupo: string, text
        ON CONFLICT DO NOTHING`,
       [i.id, chaveDa(texto, menor), chatJid, texto.slice(0, 2000), menor],
     );
-    if (nova.rowCount) bateram.push(i);
+    if (nova.rowCount) bateram.push({ i, linha: comparacao(menor, anterior, i.preco_max, fuso) });
   }
   if (!bateram.length) return null;
   const corpo = texto.length > 700 ? `${texto.slice(0, 700)}…` : texto;
-  return `🛒 *Oferta* para ${bateram.map(descreverInteresse).join(", ")}, no ${grupo}:\n\n${corpo}`;
+  // Um interesse: a régua dele. Mais de um: cada linha diz de qual é.
+  const regua = bateram.length === 1 ? bateram[0].linha : bateram.map((b) => `#${b.i.id}: ${b.linha}`).join("\n");
+  return `🛒 *Oferta* para ${bateram.map((b) => descreverInteresse(b.i)).join(", ")}, no ${grupo}:\n${regua}\n\n${corpo}`;
 }
 
 /** As últimas ofertas que bateram, para a lista de interesses mostrar o que já chegou. */

@@ -223,7 +223,7 @@ const app = criarServidor({
         if (texto) await db.query("UPDATE mensagens SET texto = $2 WHERE id = $1", [msg.id, `${msg.texto} [texto do PDF: ${texto}]`]);
       },
       aoOferta: async (jid, grupo, texto) => {
-        const aviso = await avaliarOferta(db, jid, grupo, texto);
+        const aviso = await avaliarOferta(db, jid, grupo, texto, cfg.FUSO);
         if (aviso) await avisar(aviso);
       },
       aoHistorico: async (n) => agendarEstudoDoHistorico(n),

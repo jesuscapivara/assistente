@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { lerComando } from "../src/controle.js";
 import { abrirDb, migrar, type Db } from "../src/db.js";
 import { ingerir } from "../src/ingestao.js";
-import { adicionarInteresse, avaliarOferta, casa, lerInteresse, lerValor, precos, textoDosInteresses } from "../src/ofertas.js";
+import { adicionarInteresse, avaliarOferta, casa, comparacao, lerInteresse, lerValor, precos, textoDosInteresses } from "../src/ofertas.js";
 import * as repo from "../src/repo.js";
 
 const URL_TESTE = process.env.DATABASE_URL_TESTE;
@@ -48,6 +48,21 @@ describe("regra das ofertas", () => {
     expect(casa("xbox series x", "Console Xbox Series S 512GB")).toBe(false);
     expect(casa("monitor", "Monitores LG em oferta")).toBe(true);
     expect(casa("monitor", "Monitorar a entrega")).toBe(false);
+    // "PlayStation 5", "Playstation5" e "PS 5" são o mesmo "ps5", dos dois lados.
+    expect(casa("ps5 pro", PS5)).toBe(true);
+    expect(casa("playstation 5 digital", "Console PS5 Slim Digital")).toBe(true);
+    expect(casa("ps5 -pro", "Console Playstation5 Slim com leitor")).toBe(true);
+    expect(casa("ps5", "Console PS 5 Slim")).toBe(true);
+    expect(casa("ps5", "Monitor 55 polegadas PS 55")).toBe(false);
+  });
+
+  it("compara o preço com o menor já visto", () => {
+    const em = new Date("2026-11-12T15:00:00Z");
+    expect(comparacao(null, null, null, "America/Cuiaba")).toMatch(/Sem preço/);
+    expect(comparacao(3000, null, 3400, "America/Cuiaba")).toMatch(/Primeiro preço.*teto de R\$ 3\.400/);
+    expect(comparacao(2800, { preco: 3000, em }, null, "America/Cuiaba")).toBe("📉 *Menor preço que já vi* (antes: R$ 3.000 em 12/11).");
+    expect(comparacao(3000, { preco: 3000, em }, null, "America/Cuiaba")).toMatch(/^🟰 Igual/);
+    expect(comparacao(3400, { preco: 3000, em }, null, "America/Cuiaba")).toBe("📈 R$ 400 acima do menor que já vi (R$ 3.000 em 12/11).");
   });
 
   it("lê o interesse com e sem teto", () => {
@@ -132,6 +147,7 @@ describe.skipIf(!URL_TESTE)("ofertas com banco", () => {
     expect(avisos[0]).toContain("#1 monitor 32 (até R$ 900)");
     expect(avisos[0]).not.toContain("monitor lg");
     expect(avisos[0]).toContain("no Emipe Promoções");
+    expect(avisos[0]).toContain("Primeiro preço que vejo");
 
     // Repostada (outro id, mesmo texto e preço): não avisa de novo.
     await oferta(MONITOR);
@@ -140,6 +156,9 @@ describe.skipIf(!URL_TESTE)("ofertas com banco", () => {
     await oferta(MONITOR.replace("R$ 899", "R$ 749"));
     expect(avisos).toHaveLength(2);
     expect(avisos[1]).toContain("#2 monitor lg");
+    // O 899 ficou no histórico dos dois, até no #2, cujo teto (800) ele passava.
+    expect(avisos[1]).toContain("#1: 📉 *Menor preço que já vi* (antes: R$ 899");
+    expect(avisos[1]).toContain("#2: 📉 *Menor preço que já vi* (antes: R$ 899");
 
     await oferta("Geladeira Frost Free R$ 2.999");
     expect(avisos).toHaveLength(2);
