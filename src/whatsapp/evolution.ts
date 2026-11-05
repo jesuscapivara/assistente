@@ -12,6 +12,8 @@ export interface Evolution {
   criarGrupo(nome: string, participantes: string[]): Promise<string>;
   /** A agenda do celular sincronizada no engine: o nome que o dono deu a cada número. */
   contatos(): Promise<ContatoDaAgenda[]>;
+  /** Os grupos de que o dono participa, com o nome atual de cada um. */
+  grupos(): Promise<GrupoDoDono[]>;
   baixarMidia(mensagem: Record<string, unknown>): Promise<{ buffer: Buffer; mimetype: string }>;
 }
 
@@ -19,6 +21,11 @@ export interface ContatoDaAgenda {
   jid: string;
   nome: string | null;
   push: string | null;
+}
+
+export interface GrupoDoDono {
+  jid: string;
+  nome: string | null;
 }
 
 export function criarEvolution(baseUrl: string, tokenInstancia: string, fetcher: typeof fetch = fetch): Evolution {
@@ -60,6 +67,11 @@ export function criarEvolution(baseUrl: string, tokenInstancia: string, fetcher:
     async contatos() {
       return lerAgenda(await chamar("/user/contacts", null, 30_000, "GET"));
     },
+    async grupos() {
+      // O fork 0.7.2 responde `data: null` em /group/myall (a rota que o KoreOS chama);
+      // /group/list traz a lista com o Name de cada grupo.
+      return lerGrupos(await chamar("/group/list", null, 30_000, "GET"));
+    },
     async baixarMidia(mensagem) {
       const raw = (await chamar("/message/downloadmedia", { message: mensagem }, 45_000)) as Record<string, any>;
       const url = String(raw?.data?.base64 ?? raw?.base64 ?? "");
@@ -95,6 +107,25 @@ export function lerAgenda(raw: unknown): ContatoDaAgenda[] {
   };
   if (Array.isArray(dados)) for (const it of dados) incluir(it?.JID ?? it?.jid ?? it?.id, it ?? {});
   else if (dados && typeof dados === "object") for (const [k, v] of Object.entries(dados)) incluir(k, (v ?? {}) as Record<string, any>);
+  return saida;
+}
+
+/**
+ * `/group/list`: lista (ou mapa) de grupos com `JID` e `Name`, no formato que o KoreOS
+ * normaliza em `parseGroupList`. O webhook não traz o nome do grupo, só o jid.
+ */
+export function lerGrupos(raw: unknown): GrupoDoDono[] {
+  const r = raw as Record<string, any> | null;
+  const d = r && typeof r === "object" && "data" in r ? r.data : r;
+  const lista: Record<string, any>[] = Array.isArray(d) ? d : Array.isArray(d?.groups) ? d.groups : d && typeof d === "object" ? Object.values(d) : [];
+  const saida: GrupoDoDono[] = [];
+  for (const g of lista) {
+    if (!g || typeof g !== "object") continue;
+    const jid = [g.JID, g.jid, g.GroupJID].find((x) => typeof x === "string" && x.endsWith("@g.us"));
+    if (!jid) continue;
+    const bruto = g.Name ?? g.Subject ?? g.subject ?? g.GroupName?.Name ?? g.GroupName ?? g.name;
+    saida.push({ jid, nome: typeof bruto === "string" && bruto.trim() ? bruto.trim() : null });
+  }
   return saida;
 }
 

@@ -51,7 +51,7 @@ responde por ele, **na medida da autonomia que ele der a cada contato**.
 - O resumo traz o KoreOS: suas tarefas que vencem hoje ou estão atrasadas e as contas do dia,
   lidas direto pelo MCP, sem passar pelo Claude.
 - Contato sem nome aparece pelo que se sabe dele, nunca como número de LID. Os nomes da agenda
-  do celular vêm da Evolution na subida e toda madrugada.
+  do celular vêm da Evolution na subida e toda madrugada. O nome dos grupos vem do WhatsApp (`/group/list`) nas mesmas horas e acompanha quando alguém renomeia.
 
 **Responde por você, até onde você deixar**
 
@@ -164,9 +164,11 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   porta pública, nenhum DNS. Sem Tailscale, por túnel SSH:
   `ssh -L 3100:127.0.0.1:3100 vm` e `http://localhost:3100/painel/<PAINEL_TOKEN>`.
 - **MCP para o Claude Code**: `MCP_TOKEN` (32+ caracteres, `openssl rand -hex 32`)
-  liga `POST /mcp`, com o token no cabeçalho `Authorization: Bearer`. Cinco ferramentas:
-  `buscar_contato`, `ler_conversa` (com `ate` para voltar no tempo), `buscar_mensagens`,
-  `conversas_recentes` e `pendencias`; conversa tirada com `fora` não aparece. Desde a 1.13.0
+  liga `POST /mcp`, com o token no cabeçalho `Authorization: Bearer`. Seis ferramentas:
+  `buscar_contato`, `ler_conversa` (com `ate` para voltar no tempo e `desde` para ler só o
+  novo), `buscar_mensagens`, `conversas_recentes` (por dias ou `desde`), `novidades` (tudo que
+  chegou depois de um instante, por conversa, numa chamada: é o que atualiza as anotações do
+  Claude Code sem ler conversa por conversa) e `pendencias`; conversa tirada com `fora` não aparece. Desde a 1.13.0
   também envia, em dois passos: `preparar_mensagem` grava um rascunho (que chega no seu canal,
   onde vale `ok`/veto) e `enviar_rascunho` manda depois do seu sim na sessão; `criar_grupo`
   só cria com `confirmar: true`. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo

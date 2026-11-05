@@ -397,6 +397,21 @@ export async function gravarNomesDaAgenda(db: Db, nomes: { jid: string; nome: st
   return n;
 }
 
+/**
+ * Nome dos grupos, como está no WhatsApp. Ao contrário da agenda, troca o que havia:
+ * o nome do grupo é do grupo (alguém pode renomear), não um apelido que o dono deu.
+ * Só toca grupo que o assistente já conhece; não cria contato.
+ */
+export async function gravarNomesDeGrupos(db: Db, grupos: { jid: string; nome: string | null }[]): Promise<number> {
+  let n = 0;
+  for (const g of grupos) {
+    if (!g.nome) continue;
+    const r = await db.query("UPDATE contatos SET nome = $2 WHERE jid = $1 AND grupo AND nome IS DISTINCT FROM $2", [g.jid, g.nome]);
+    n += r.rowCount ?? 0;
+  }
+  return n;
+}
+
 export interface Fala {
   autor: "dono" | "assistente";
   texto: string;
@@ -774,22 +789,32 @@ export async function rascunhoAberto(db: Db, jid: string): Promise<boolean> {
 }
 
 /**
- * Conversas com mensagem nos últimos `dias`, da mais recente para a mais antiga, com a
+ * Conversas com mensagem depois de `desde`, da mais recente para a mais antiga, com a
  * situação de cada uma: é o "o que rolou na semana" do MCP, sem chamar modelo.
  */
 export async function conversasRecentes(
   db: Db,
-  dias: number,
+  desde: Date,
   limite = 40,
 ): Promise<{ jid: string; nome: string; grupo: boolean; situacao: string; espera_resposta: boolean; quantas: number; ultima_em: Date }[]> {
   const r = await db.query(
     `SELECT c.jid, ${NOME_SQL} AS nome, c.grupo, c.situacao, c.espera_resposta, u.quantas, u.ultima_em
      FROM contatos c
      JOIN LATERAL (SELECT count(*)::int AS quantas, max(enviada_em) AS ultima_em FROM mensagens
-                   WHERE chat_jid = c.jid AND enviada_em > now() - make_interval(days => $1)) u ON u.quantas > 0
+                   WHERE chat_jid = c.jid AND enviada_em > $1) u ON u.quantas > 0
      WHERE NOT c.excluido AND NOT c.sistema
      ORDER BY u.ultima_em DESC LIMIT $2`,
-    [dias, limite],
+    [desde, limite],
+  );
+  return r.rows;
+}
+
+/** As primeiras `limite` mensagens de uma conversa depois de `desde`, em ordem: ler só o que é novo. */
+export async function mensagensDesde(db: Db, chatJid: string, desde: Date, limite: number): Promise<Mensagem[]> {
+  const r = await db.query<Mensagem>(
+    `SELECT id, chat_jid, remetente_nome, de_mim, tipo, texto, enviada_em FROM mensagens
+     WHERE chat_jid = $1 AND enviada_em > $2 ORDER BY enviada_em LIMIT $3`,
+    [chatJid, desde, limite],
   );
   return r.rows;
 }

@@ -128,10 +128,18 @@ async function enviarResumo(): Promise<void> {
   await avisar(texto, refs);
 }
 
-/** Os nomes da agenda do celular, que o webhook não traz para quem nunca escreveu. */
+/**
+ * Os nomes da agenda do celular, que o webhook não traz para quem nunca escreveu, e o
+ * dos grupos, que o webhook nunca traz. Um falhar não impede o outro.
+ */
 async function sincronizarNomes(): Promise<void> {
   const n = await repo.gravarNomesDaAgenda(db, await evolution.contatos());
   if (n) app.log.info({ n }, "nomes da agenda gravados");
+  const g = await repo.gravarNomesDeGrupos(db, await evolution.grupos()).catch((err) => {
+    log({ err: String(err) }, "nomes dos grupos falharam");
+    return 0;
+  });
+  if (g) app.log.info({ n: g }, "nomes dos grupos gravados");
 }
 
 const depsControle: DepsControle = {

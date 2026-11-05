@@ -30,6 +30,7 @@ class EnvioFalso {
       return "120363000000000009@g.us";
     },
     contatos: async () => [],
+    grupos: async () => [],
     baixarMidia: async () => ({ buffer: Buffer.from(""), mimetype: "" }),
   };
   avisar = async (t: string) => void this.avisos.push(t);
@@ -73,7 +74,7 @@ describe("protocolo do MCP", () => {
     expect((await chamar(app, { jsonrpc: "2.0", method: "notifications/initialized" })).statusCode).toBe(202);
 
     const lista = (await chamar(app, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
-    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "ler_conversa", "pendencias"]);
+    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "ler_conversa", "novidades", "pendencias"]);
     expect(lista.every((t: any) => t.annotations.readOnlyHint && t.inputSchema.type === "object")).toBe(true);
     // Nada que envie: o envio só sai por executarEnvio, com as travas.
     expect(lista.some((t: any) => /envi|respond|propor/.test(t.name))).toBe(false);
@@ -150,6 +151,46 @@ describe.skipIf(!URL_TESTE)("ferramentas do MCP com banco", () => {
     const antes = (await ferramenta(app, "ler_conversa", { contato: FERNANDA, ate: new Date(Date.now() - 10 * 3600_000).toISOString() })).content[0].text;
     expect(antes).toContain("orçamento");
     expect(antes).not.toContain("Obrigada");
+  });
+
+  it("lê só o que é novo com `desde` e junta as novidades de todas as conversas", async () => {
+    await msg(FERNANDA, "mensagem velha", { horasAtras: 30 });
+    await msg(FERNANDA, "mensagem nova", { horasAtras: 2 });
+    await msg(ANA_1, "oi, tudo bem?", { nome: "Ana Paula", horasAtras: 1 });
+    const corte = new Date(Date.now() - 10 * 3600_000).toISOString();
+
+    const depois = (await ferramenta(app, "ler_conversa", { contato: FERNANDA, desde: corte })).content[0].text;
+    expect(depois).toContain("mensagem nova");
+    expect(depois).not.toContain("mensagem velha");
+    expect((await ferramenta(app, "ler_conversa", { contato: FERNANDA, desde: corte, ate: corte })).content[0].text).toMatch(/não os dois/);
+
+    const tudo = (await ferramenta(app, "novidades", { desde: corte })).content[0].text;
+    expect(tudo).toMatch(/^2 conversa\(s\) com novidade/);
+    expect(tudo).toContain("mensagem nova");
+    expect(tudo).toContain("oi, tudo bem?");
+    expect(tudo).not.toContain("mensagem velha");
+
+    const semAna = (await ferramenta(app, "novidades", { desde: corte, ignorar: [ANA_1] })).content[0].text;
+    expect(semAna).not.toContain("oi, tudo bem?");
+
+    const corta = (await ferramenta(app, "novidades", { desde: new Date(Date.now() - 40 * 3600_000).toISOString(), por_conversa: 1 })).content[0].text;
+    expect(corta).toContain("mensagem velha");
+    expect(corta).toContain("(+1 mensagens depois destas");
+
+    expect((await ferramenta(app, "conversas_recentes", { desde: corte })).content[0].text).toContain("Ana Paula");
+    expect((await ferramenta(app, "novidades", { desde: new Date().toISOString() })).content[0].text).toBe("Nada novo depois desse instante.");
+  });
+
+  it("o nome do grupo vem do WhatsApp e acompanha a troca", async () => {
+    const GRUPO = "120363000000000042@g.us";
+    await repo.garantirContato(db, GRUPO, { grupo: true });
+    expect(await repo.gravarNomesDeGrupos(db, [{ jid: GRUPO, nome: "Obra Florais" }, { jid: "120363000000000043@g.us", nome: "Não conhecido" }])).toBe(1);
+    expect(await repo.gravarNomesDeGrupos(db, [{ jid: GRUPO, nome: "Obra Florais" }])).toBe(0);
+    expect(await repo.gravarNomesDeGrupos(db, [{ jid: GRUPO, nome: "Obra Florais · Entrega" }])).toBe(1);
+    expect((await repo.lerContato(db, GRUPO))?.nome).toBe("Obra Florais · Entrega");
+    // Pessoa não é tocada, mesmo com o jid na lista.
+    await msg(FERNANDA, "oi");
+    expect(await repo.gravarNomesDeGrupos(db, [{ jid: FERNANDA, nome: "Outro nome" }])).toBe(0);
   });
 
   it("nome ambíguo não escolhe sozinho", async () => {

@@ -92,6 +92,9 @@ class WhatsFalso implements Evolution {
   async contatos() {
     return [];
   }
+  async grupos() {
+    return [];
+  }
   async baixarMidia() {
     return { buffer: Buffer.from(""), mimetype: "audio/ogg" };
   }

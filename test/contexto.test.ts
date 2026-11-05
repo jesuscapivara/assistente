@@ -9,7 +9,7 @@ import { nomeDe } from "../src/repo.js";
 import type { Dia } from "../src/resumo.js";
 import { resumoEmTexto } from "../src/resumo.js";
 import { koreosDoDia, resultadoDoMcp } from "../src/koreos.js";
-import { lerAgenda } from "../src/whatsapp/evolution.js";
+import { lerAgenda, lerGrupos } from "../src/whatsapp/evolution.js";
 import { lerHistorico } from "../src/whatsapp/evento.js";
 
 const SP = "America/Sao_Paulo";
@@ -282,5 +282,24 @@ describe("agir pela letra do resumo", () => {
     expect(p.precisa[1]).toMatchObject({ tipo: "espera", jid: "a@s.whatsapp.net" });
     expect(p.precisa[2]).toMatchObject({ tipo: "compromisso", compromissoId: 7, jid: "c@s.whatsapp.net" });
     expect(p.ficou).toEqual([{ letra: "C", tipo: "espera", titulo: "Bruno", jid: "b@s.whatsapp.net" }]);
+  });
+});
+
+describe("nomes dos grupos", () => {
+  it("lê o /group/list do engine e ignora o que não é grupo", () => {
+    expect(
+      lerGrupos({
+        data: [
+          { JID: "120363430434368244@g.us", Name: " Maná · Obra " },
+          { JID: "120363000000000001@g.us", Name: "" },
+          { JID: "5551933333333@s.whatsapp.net", Name: "pessoa" },
+          null,
+        ],
+      }),
+    ).toEqual([
+      { jid: "120363430434368244@g.us", nome: "Maná · Obra" },
+      { jid: "120363000000000001@g.us", nome: null },
+    ]);
+    expect(lerGrupos({ data: null, message: "success" })).toEqual([]);
   });
 });
