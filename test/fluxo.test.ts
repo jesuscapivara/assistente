@@ -147,6 +147,22 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     expect((await db.query("SELECT count(*)::int AS n FROM mensagens")).rows[0].n).toBe(1);
   });
 
+  it("arquivo que o dono manda para si mesmo fica guardado, sem virar comando nem leitura", async () => {
+    const doc = msg(DONO, "", { deMim: true });
+    (doc.data as any).Message = { documentMessage: { fileName: "Cartão CNPJ - Exo.pdf", mediaKey: "k", directPath: "/p" } };
+    expect(await ing(doc)).toBe("gravado");
+    expect(await ing(doc)).toBe("repetido");
+    expect(comandos).toEqual([]);
+    const c = await repo.lerContato(db, DONO);
+    expect(c).toMatchObject({ nome: "Você (arquivos)", sistema: true });
+    const lista = await repo.arquivos(db, { tipos: ["documento"], limite: 10 });
+    expect(lista.map((a) => a.texto)).toEqual(["[arquivo: Cartão CNPJ - Exo.pdf]"]);
+    // Já nasce lida: a extração não gasta modelo com ela.
+    expect((await db.query("SELECT extraida FROM mensagens WHERE chat_jid = $1", [DONO])).rows[0].extraida).toBe(true);
+    // Texto no mesmo chat continua sendo comando.
+    expect(await ing(msg(DONO, "resumo", { deMim: true }))).toBe("comando");
+  });
+
   it("a própria resposta do assistente não vira comando (sem laço)", async () => {
     const eco = msg(DONO, "🤖 Bom dia!", { deMim: true });
     await repo.registrarEnviada(db, eco.data.Info.ID);

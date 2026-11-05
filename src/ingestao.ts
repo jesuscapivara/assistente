@@ -50,6 +50,7 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
       await deps.aoComandoAudio(msg);
       return "comando";
     }
+    if (msg.tipo === "documento" || msg.tipo === "imagem" || msg.tipo === "video") return guardarArquivoDoDono(msg, deps);
     if (msg.tipo !== "texto") return "ignorado";
     await deps.aoComando(msg.texto, msg);
     return "comando";
@@ -88,6 +89,28 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
   if (m.tipo === "imagem" && (!m.grupo || contato.acompanhado) && !m.deMim && deps.aoImagem) {
     void deps.aoImagem(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "leitura da foto falhou"));
   }
+  if (m.tipo === "documento" && ehPdf(texto) && deps.aoDocumento) {
+    void deps.aoDocumento(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "leitura do PDF falhou"));
+  }
+  return "gravado";
+}
+
+/** Como aparece a conversa dos arquivos que o dono manda para si mesmo. */
+export const NOME_ARQUIVOS_DO_DONO = "Você (arquivos)";
+
+/**
+ * Arquivo que o dono manda para si mesmo (pedido do Lucas, 05/11/2026: encaminha
+ * documentos para o próprio contato para o Claude Code ler). Não é comando: fica numa
+ * conversa própria, no número dele, para dar para baixar pelo MCP. Já nasce lida e como
+ * sistema: não custa leitura de modelo, nem aparece em pendências ou nas anotações.
+ */
+async function guardarArquivoDoDono(msg: MensagemRecebida, deps: DepsIngestao): Promise<Resultado> {
+  const jid = [...deps.jidsDoDono].find((j) => j.endsWith("@s.whatsapp.net")) ?? msg.chatJid;
+  await repo.garantirContato(deps.db, jid, { grupo: false });
+  await deps.db.query("UPDATE contatos SET nome = COALESCE(nome, $2), sistema = TRUE WHERE jid = $1", [jid, NOME_ARQUIVOS_DO_DONO]);
+  const m = { ...msg, chatJid: jid };
+  const texto = m.texto || `[${m.tipo}]`;
+  if (!(await repo.gravarMensagem(deps.db, m, texto, true))) return "repetido";
   if (m.tipo === "documento" && ehPdf(texto) && deps.aoDocumento) {
     void deps.aoDocumento(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "leitura do PDF falhou"));
   }

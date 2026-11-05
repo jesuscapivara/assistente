@@ -91,6 +91,7 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `perfil` · `regra nunca marco nada antes das 9` · `esquece 4` | o que ele sabe de você |
 | `estuda` | atualiza agora as fichas e o seu retrato |
 | `fora Grupo da Família` · `volta Grupo da Família` | tira (e apaga) ou devolve uma conversa |
+| (documento, foto ou vídeo para você mesmo) | fica guardado na conversa "Você (arquivos)", para o Claude Code baixar pelo MCP (`arquivos`); não vira comando nem leitura de modelo; PDF tem o texto lido |
 | `promo Emipe Promoções` | grupo de promoção: sai do assistente (como o `fora`), mas cada oferta passa pelos seus interesses |
 | `acompanha Obra Largo do Rosário` · `solta Obra Largo do Rosário` | grupo de obra ou projeto lido sempre (não só quando citam você), com as fotos descritas |
 | `interesse monitor 27 até 900` · `interesses` · `esquece interesse 2` | avisa quando sair oferta com todas as palavras (`-palavra` exclui) e até o teto; a lista mostra os grupos vigiados e o que já bateu |
