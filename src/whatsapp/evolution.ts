@@ -8,6 +8,8 @@ export interface Evolution {
   enviarTexto(destino: string, texto: string): Promise<string | null>;
   /** Imagem por URL (o engine baixa e envia), com legenda. */
   enviarImagem(destino: string, url: string, legenda: string): Promise<string | null>;
+  /** Cria um grupo com o dono e os participantes (jids); devolve o jid do grupo. */
+  criarGrupo(nome: string, participantes: string[]): Promise<string>;
   /** A agenda do celular sincronizada no engine: o nome que o dono deu a cada número. */
   contatos(): Promise<ContatoDaAgenda[]>;
   baixarMidia(mensagem: Record<string, unknown>): Promise<{ buffer: Buffer; mimetype: string }>;
@@ -46,6 +48,14 @@ export function criarEvolution(baseUrl: string, tokenInstancia: string, fetcher:
     async enviarImagem(destino, url, legenda) {
       const raw = await chamar("/send/media", { number: destino, url, type: "image", caption: legenda, filename: "resumo.png" }, 45_000);
       return idDaResposta(raw);
+    },
+    async criarGrupo(nome, participantes) {
+      // Contrato do fork 0.7.2 que o KoreOS usa (`createGroup` em evolutionApiService.js):
+      // participantes como jid completo, porque só dígitos trava o engine até o timeout.
+      const raw = await chamar("/group/create", { groupName: nome, participants: participantes }, 90_000);
+      const jid = jidDoGrupo(raw);
+      if (!jid) throw new Error(`o engine não devolveu o jid do grupo: ${JSON.stringify(raw).slice(0, 200)}`);
+      return jid;
     },
     async contatos() {
       return lerAgenda(await chamar("/user/contacts", null, 30_000, "GET"));
@@ -86,6 +96,15 @@ export function lerAgenda(raw: unknown): ContatoDaAgenda[] {
   if (Array.isArray(dados)) for (const it of dados) incluir(it?.JID ?? it?.jid ?? it?.id, it ?? {});
   else if (dados && typeof dados === "object") for (const [k, v] of Object.entries(dados)) incluir(k, (v ?? {}) as Record<string, any>);
   return saida;
+}
+
+/** O jid do grupo criado, nos formatos que o engine já devolveu (ver `parseGroupJid` no KoreOS). */
+export function jidDoGrupo(raw: unknown): string | null {
+  const r = raw as Record<string, any> | null;
+  const d = r && typeof r === "object" && "data" in r ? r.data : r;
+  if (typeof d === "string") return d.endsWith("@g.us") ? d : null;
+  for (const c of [d?.JID, d?.groupJid, d?.GroupJID, d?.jid, d?.id]) if (typeof c === "string" && c.endsWith("@g.us")) return c;
+  return null;
 }
 
 /** O id da mensagem enviada vem em lugares diferentes conforme a versão do engine. */

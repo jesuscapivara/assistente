@@ -210,7 +210,7 @@ const app = criarServidor({
       aoHistorico: async (n) => agendarEstudoDoHistorico(n),
       log,
     }),
-  mcp: cfg.MCP_TOKEN ? { token: cfg.MCP_TOKEN, db, dono: cfg.DONO_NOME, fuso: cfg.FUSO } : undefined,
+  mcp: cfg.MCP_TOKEN ? { token: cfg.MCP_TOKEN, db, dono: cfg.DONO_NOME, fuso: cfg.FUSO, envio: { evolution, avisar } } : undefined,
   painel: cfg.PAINEL_TOKEN
     ? {
         token: cfg.PAINEL_TOKEN,

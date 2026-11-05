@@ -163,11 +163,13 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   rede do Tailscale. Abra `https://<máquina>.<rede>.ts.net/painel/<PAINEL_TOKEN>`. Nenhuma
   porta pública, nenhum DNS. Sem Tailscale, por túnel SSH:
   `ssh -L 3100:127.0.0.1:3100 vm` e `http://localhost:3100/painel/<PAINEL_TOKEN>`.
-- **MCP para o Claude Code** (só leitura): `MCP_TOKEN` (32+ caracteres, `openssl rand -hex 32`)
+- **MCP para o Claude Code**: `MCP_TOKEN` (32+ caracteres, `openssl rand -hex 32`)
   liga `POST /mcp`, com o token no cabeçalho `Authorization: Bearer`. Cinco ferramentas:
   `buscar_contato`, `ler_conversa` (com `ate` para voltar no tempo), `buscar_mensagens`,
-  `conversas_recentes` e `pendencias`. Nenhuma envia nem altera nada, e conversa tirada com
-  `fora` não aparece. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo
+  `conversas_recentes` e `pendencias`; conversa tirada com `fora` não aparece. Desde a 1.13.0
+  também envia, em dois passos: `preparar_mensagem` grava um rascunho (que chega no seu canal,
+  onde vale `ok`/veto) e `enviar_rascunho` manda depois do seu sim na sessão; `criar_grupo`
+  só cria com `confirmar: true`. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo
   endereço do Tailscale do painel:
   `claude mcp add --transport http -s user whatsapp https://<máquina>.<rede>.ts.net/mcp --header "Authorization: Bearer <MCP_TOKEN>"`.
   Sem Tailscale, com o túnel SSH aberto: `http://localhost:3100/mcp`.
@@ -231,7 +233,8 @@ Para ver o cartão sem banco nem Claude: `npx tsx scripts/cartao-exemplo.ts cart
 - Texto bruto apagado depois de `RETENCAO_DIAS` (365); a ficha e a memória de cada pessoa ficam.
 - `fora <nome>` apaga na hora tudo daquela conversa: mensagens, ficha, compromissos, datas e rascunhos.
 - Webhook, painel e engine sem porta pública; os tokens não aparecem no log.
-- O MCP do Claude Code só lê. O que ele devolve vai para o contexto da sessão do Claude Code
+- O MCP do Claude Code só envia rascunho que você aprovou na sessão, sempre por `executarEnvio`,
+  e cada rascunho é avisado no seu canal. O que ele devolve vai para o contexto da sessão do Claude Code
   (e daí para a Anthropic), como já acontece com o agente do assistente.
 - E-mail só é enviado, e convite só é mandado, por ordem sua e para endereço que **você**
   digitou no chat ou no painel nas últimas 24 h. Endereço tirado de mensagem ou e-mail de

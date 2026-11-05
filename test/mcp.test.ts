@@ -15,8 +15,32 @@ const FERNANDA = "5551911111111@s.whatsapp.net";
 const ANA_1 = "5551933333333@s.whatsapp.net";
 const ANA_2 = "5551944444444@s.whatsapp.net";
 
-function servidor(db: Db) {
-  return criarServidor({ webhookToken: "w".repeat(20), aoEvento: async () => {}, mcp: { token: TOKEN, db, dono: "Lucas", fuso: "America/Sao_Paulo" } });
+class EnvioFalso {
+  enviadas: { destino: string; texto: string }[] = [];
+  grupos: { nome: string; participantes: string[] }[] = [];
+  avisos: string[] = [];
+  evolution = {
+    enviarTexto: async (destino: string, texto: string) => {
+      this.enviadas.push({ destino, texto });
+      return `E${this.enviadas.length}`;
+    },
+    enviarImagem: async () => null,
+    criarGrupo: async (nome: string, participantes: string[]) => {
+      this.grupos.push({ nome, participantes });
+      return "120363000000000009@g.us";
+    },
+    contatos: async () => [],
+    baixarMidia: async () => ({ buffer: Buffer.from(""), mimetype: "" }),
+  };
+  avisar = async (t: string) => void this.avisos.push(t);
+}
+
+function servidor(db: Db, envio?: EnvioFalso) {
+  return criarServidor({
+    webhookToken: "w".repeat(20),
+    aoEvento: async () => {},
+    mcp: { token: TOKEN, db, dono: "Lucas", fuso: "America/Sao_Paulo", envio: envio && { evolution: envio.evolution, avisar: envio.avisar } },
+  });
 }
 
 async function chamar(app: ReturnType<typeof servidor>, corpo: unknown, token = TOKEN) {
@@ -53,6 +77,15 @@ describe("protocolo do MCP", () => {
     expect(lista.every((t: any) => t.annotations.readOnlyHint && t.inputSchema.type === "object")).toBe(true);
     // Nada que envie: o envio só sai por executarEnvio, com as travas.
     expect(lista.some((t: any) => /envi|respond|propor/.test(t.name))).toBe(false);
+  });
+
+  it("com envio ligado, lista as ferramentas de envio sem a marca de leitura", async () => {
+    const comEnvio = servidor({} as Db, new EnvioFalso());
+    const lista = (await chamar(comEnvio, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
+    const envio = lista.filter((t: any) => !t.annotations.readOnlyHint).map((t: any) => t.name).sort();
+    expect(envio).toEqual(["criar_grupo", "enviar_rascunho", "preparar_mensagem"]);
+    const ini = (await chamar(comEnvio, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).json();
+    expect(ini.result.instructions).toMatch(/só depois do sim dele/);
   });
 
   it("devolve erro de JSON-RPC para método e ferramenta desconhecidos, e erro de ferramenta para parâmetro ruim", async () => {
@@ -150,5 +183,35 @@ describe.skipIf(!URL_TESTE)("ferramentas do MCP com banco", () => {
     expect((await ferramenta(app, "ler_conversa", { contato: FERNANDA })).content[0].text).toBe("Conversa não encontrada.");
     expect((await ferramenta(app, "buscar_mensagens", { termo: "planta" })).content[0].text).toBe("Nada encontrado.");
     expect((await ferramenta(app, "conversas_recentes", {})).content[0].text).toMatch(/Nenhuma conversa/);
+  });
+
+  it("prepara sem enviar, envia só pelo #id e não envia duas vezes", async () => {
+    await msg(FERNANDA, "Oi Lucas");
+    const envio = new EnvioFalso();
+    const app2 = servidor(db, envio);
+    const prep = (await ferramenta(app2, "preparar_mensagem", { contato: "Fernanda", texto: "Oi Fernanda, tudo certo." })).content[0].text;
+    expect(prep).toMatch(/Rascunho #1 para Fernanda/);
+    expect(envio.enviadas).toHaveLength(0);
+    expect(envio.avisos[0]).toContain("Oi Fernanda, tudo certo.");
+
+    expect((await ferramenta(app2, "enviar_rascunho", { id: 1 })).content[0].text).toBe("Enviado o #1.");
+    expect(envio.enviadas).toEqual([{ destino: FERNANDA, texto: "Oi Fernanda, tudo certo." }]);
+    expect((await ferramenta(app2, "ler_conversa", { contato: FERNANDA })).content[0].text).toContain("Lucas: Oi Fernanda, tudo certo.");
+    expect((await ferramenta(app2, "enviar_rascunho", { id: 1 })).content[0].text).toMatch(/não está aguardando/);
+    expect(envio.enviadas).toHaveLength(1);
+  });
+
+  it("cria grupo só com confirmar, e o grupo já serve de destino", async () => {
+    await msg(FERNANDA, "Oi");
+    await msg(ANA_1, "olá", { nome: "Ana Paula" });
+    const envio = new EnvioFalso();
+    const app2 = servidor(db, envio);
+    const previa = (await ferramenta(app2, "criar_grupo", { nome: "Obra Teste", participantes: ["Fernanda", ANA_1] })).content[0].text;
+    expect(previa).toMatch(/confirmar: true/);
+    expect(envio.grupos).toHaveLength(0);
+
+    await ferramenta(app2, "criar_grupo", { nome: "Obra Teste", participantes: ["Fernanda", ANA_1], confirmar: true });
+    expect(envio.grupos).toEqual([{ nome: "Obra Teste", participantes: [FERNANDA, ANA_1] }]);
+    expect((await ferramenta(app2, "preparar_mensagem", { contato: "Obra Teste", texto: "Bem-vindas" })).content[0].text).toMatch(/\(grupo\)/);
   });
 });

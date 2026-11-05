@@ -8,6 +8,10 @@ Leia o README antes (fluxo, comandos, instalação).
   nível 2 com janela de veto, nível 3 direto, e nunca com risco alto, `[preencher:]`, em grupo,
   entre 21h e 8h ou com `pausa`. Não crie outro caminho de envio nem afrouxe essas travas sem
   pedido explícito do Lucas.
+- Exceção pedida pelo Lucas (05/11/2026): o MCP do Claude Code (`src/mcp.ts`) envia e cria
+  grupo, só pelas sessões dele. Envio em dois passos: `preparar_mensagem` grava rascunho comum
+  (avisado no canal do dono), `enviar_rascunho` passa por `executarEnvio`, depois do sim dele no
+  chat. Criar grupo pede `confirmar: true`. Sem `envio` nas deps, o MCP volta a ser só leitura.
 - E-mail e convite de evento (pedido do Lucas, 22/10/2026): saem por ordem dele, e só para
   endereço que ele mesmo digitou (`enderecosDoDono` em `src/controle.ts`, falas `dono` do
   `dialogo` nas últimas 24 h; a trava é `destinatarios` em `src/ferramentas_google.ts`).
