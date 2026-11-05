@@ -41,15 +41,16 @@ export function precos(texto: string): number[] {
 }
 
 /**
- * Todas as palavras do interesse aparecem e nenhuma das "-palavra". Número casa inteiro
- * ("27" não casa com "270"); palavra casa pelo começo ("monitor" casa com "monitores").
+ * Todas as palavras do interesse aparecem e nenhuma das "-palavra". A palavra casa inteira,
+ * ou no plural ("monitor" casa com "monitores"): pelo começo, "pro" casaria com "promoção"
+ * e "x" com "xbox", que estão em quase toda oferta. Número casa inteiro ("27" não é "270").
  */
 export function casa(termos: string, texto: string): boolean {
   const t = normalizar(texto);
   const palavras = normalizar(termos).split(/\s+/).filter(Boolean);
   const tem = (p: string) => {
     const e = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(/^\d+$/.test(p) ? `(^|[^a-z0-9])${e}([^a-z0-9]|$)` : `(^|[^a-z0-9])${e}`).test(t);
+    return new RegExp(/^\d+$/.test(p) ? `(^|[^a-z0-9])${e}([^a-z0-9]|$)` : `(^|[^a-z0-9])${e}(s|es)?([^a-z0-9]|$)`).test(t);
   };
   const quer = palavras.filter((p) => !p.startsWith("-"));
   const nao = palavras.filter((p) => p.startsWith("-") && p.length > 1).map((p) => p.slice(1));

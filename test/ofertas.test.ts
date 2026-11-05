@@ -39,6 +39,15 @@ describe("regra das ofertas", () => {
     expect(casa("geladeira", "Geladeira Frost Free Brastemp")).toBe(true);
     expect(casa("cafe", "Café Pilão 500g")).toBe(true);
     expect(casa("-lg", MONITOR)).toBe(false);
+    // Palavra inteira: "pro" não é "promoção", "x" não é "xbox".
+    const PS5 = "🔥 Console PlayStation 5 Pro 2TB Branco — promoção relâmpago R$ 4.999";
+    expect(casa("playstation 5 pro", PS5)).toBe(true);
+    expect(casa("ps5 pro", "Console PS5 Pro Digital R$ 4.799")).toBe(true);
+    expect(casa("ps5 pro", "Console PS5 Slim, promoção do dia")).toBe(false);
+    expect(casa("xbox series x", "Console Xbox Series X 1TB Preto")).toBe(true);
+    expect(casa("xbox series x", "Console Xbox Series S 512GB")).toBe(false);
+    expect(casa("monitor", "Monitores LG em oferta")).toBe(true);
+    expect(casa("monitor", "Monitorar a entrega")).toBe(false);
   });
 
   it("lê o interesse com e sem teto", () => {
