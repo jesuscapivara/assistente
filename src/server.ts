@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
+import { tratarMcp, type DepsMcp } from "./mcp.js";
 import { lerImagem } from "./midia.js";
 import { voltaSegura } from "./painel.js";
 
@@ -29,6 +30,7 @@ export function criarServidor(opts: {
   webhookToken: string;
   aoEvento(payload: unknown): Promise<unknown>;
   painel?: OpcoesPainel;
+  mcp?: { token: string } & DepsMcp;
 }): FastifyInstance {
   const app = Fastify({
     logger: {
@@ -84,6 +86,27 @@ export function criarServidor(opts: {
       const volta = voltaSegura(req.body?.volta);
       return reply.redirect(`/painel/${req.params.token}${volta ? `?${volta}` : ""}`, 303);
     });
+  }
+
+  const mcp = opts.mcp;
+  if (mcp) {
+    // O token vem no cabeçalho, não no caminho: o Claude Code manda `Authorization` e o
+    // log do Fastify não registra cabeçalhos.
+    app.post("/mcp", async (req, reply) => {
+      const auth = String(req.headers.authorization ?? "");
+      if (!auth.startsWith("Bearer ") || !tokenConfere(auth.slice(7).trim(), mcp.token)) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      const corpo = req.body as any;
+      if (Array.isArray(corpo)) {
+        const respostas = (await Promise.all(corpo.map((p) => tratarMcp(p, mcp)))).filter(Boolean);
+        return respostas.length ? reply.send(respostas) : reply.code(202).send();
+      }
+      const r = await tratarMcp(corpo, mcp);
+      return r ? reply.send(r) : reply.code(202).send();
+    });
+    // Sem sessão nem SSE: o GET (fluxo de eventos do servidor) não existe aqui.
+    app.get("/mcp", async (_req, reply) => reply.code(405).header("Allow", "POST").send());
   }
 
   return app;

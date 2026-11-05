@@ -210,6 +210,7 @@ const app = criarServidor({
       aoHistorico: async (n) => agendarEstudoDoHistorico(n),
       log,
     }),
+  mcp: cfg.MCP_TOKEN ? { token: cfg.MCP_TOKEN, db, dono: cfg.DONO_NOME, fuso: cfg.FUSO } : undefined,
   painel: cfg.PAINEL_TOKEN
     ? {
         token: cfg.PAINEL_TOKEN,
@@ -308,7 +309,7 @@ const pararTelegram = telegram
     })
   : () => undefined;
 app.log.info(
-  { migracoes: aplicadas, google: Boolean(google), koreos: Boolean(koreos), painel: Boolean(cfg.PAINEL_TOKEN) },
+  { migracoes: aplicadas, google: Boolean(google), koreos: Boolean(koreos), painel: Boolean(cfg.PAINEL_TOKEN), mcp: Boolean(cfg.MCP_TOKEN) },
   "assistente no ar",
 );
 

@@ -772,3 +772,43 @@ export async function rascunhoAberto(db: Db, jid: string): Promise<boolean> {
   const r = await db.query("SELECT 1 FROM rascunhos WHERE chat_jid = $1 AND status = 'aguardando'", [jid]);
   return (r.rowCount ?? 0) > 0;
 }
+
+/**
+ * Conversas com mensagem nos últimos `dias`, da mais recente para a mais antiga, com a
+ * situação de cada uma: é o "o que rolou na semana" do MCP, sem chamar modelo.
+ */
+export async function conversasRecentes(
+  db: Db,
+  dias: number,
+  limite = 40,
+): Promise<{ jid: string; nome: string; grupo: boolean; situacao: string; espera_resposta: boolean; quantas: number; ultima_em: Date }[]> {
+  const r = await db.query(
+    `SELECT c.jid, ${NOME_SQL} AS nome, c.grupo, c.situacao, c.espera_resposta, u.quantas, u.ultima_em
+     FROM contatos c
+     JOIN LATERAL (SELECT count(*)::int AS quantas, max(enviada_em) AS ultima_em FROM mensagens
+                   WHERE chat_jid = c.jid AND enviada_em > now() - make_interval(days => $1)) u ON u.quantas > 0
+     WHERE NOT c.excluido AND NOT c.sistema
+     ORDER BY u.ultima_em DESC LIMIT $2`,
+    [dias, limite],
+  );
+  return r.rows;
+}
+
+/** As `limite` mensagens de uma conversa anteriores a `ate`, em ordem: ler o passado aos pedaços. */
+export async function mensagensAte(db: Db, chatJid: string, ate: Date, limite: number): Promise<Mensagem[]> {
+  const r = await db.query<Mensagem>(
+    `SELECT id, chat_jid, remetente_nome, de_mim, tipo, texto, enviada_em FROM mensagens
+     WHERE chat_jid = $1 AND enviada_em < $2 ORDER BY enviada_em DESC LIMIT $3`,
+    [chatJid, ate, limite],
+  );
+  return r.rows.reverse();
+}
+
+/** Tudo que o dono espera dos contatos, cobrado ou não (o `paraCobrar` só traz o que falta cobrar). */
+export async function aguardandoDeles(db: Db): Promise<(Contato & { aguardando_desde: Date | null })[]> {
+  const r = await db.query<Contato & { aguardando_desde: Date | null }>(
+    `SELECT ${COLUNAS_CONTATO}, aguardando_desde FROM contatos
+     WHERE NOT excluido AND aguardando <> '' ORDER BY aguardando_desde NULLS LAST`,
+  );
+  return r.rows;
+}

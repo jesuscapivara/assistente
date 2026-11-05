@@ -13,6 +13,20 @@ export function dataCurta(d: Date, fuso: string): string {
     .replace(",", "");
 }
 
+/** Com o ano, "21/10/2026 14:32": fora do WhatsApp, a conversa pode ser de outro ano. */
+export function dataComAno(d: Date, fuso: string): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: fuso,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(d)
+    .replace(",", "");
+}
+
 /** "terça-feira, 21/10/2026 14:32 (America/Sao_Paulo)": o "agora" que vai nos prompts. */
 export function agoraPorExtenso(d: Date, fuso: string): string {
   const txt = new Intl.DateTimeFormat("pt-BR", {

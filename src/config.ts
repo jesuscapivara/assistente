@@ -71,6 +71,10 @@ const Esquema = z.object({
   // Painel web (opcional). Sem token, a rota não existe.
   PAINEL_TOKEN: z.string().min(24).optional(),
 
+  // MCP de leitura em /mcp (opcional), para as sessões do Claude Code do dono: vai no
+  // cabeçalho `Authorization: Bearer <token>`. Sem token, a rota não existe.
+  MCP_TOKEN: z.string().min(32).optional(),
+
   // Resumo da manhã como imagem (o cartão), com o texto curto na legenda. A Evolution
   // busca a imagem em URL_INTERNA (o endereço do assistente na rede do Docker; sem ela,
   // a origem de WEBHOOK_URL_PUBLICA). Se a imagem falhar, sai o texto.
