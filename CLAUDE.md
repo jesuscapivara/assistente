@@ -12,6 +12,8 @@ Leia o README antes (fluxo, comandos, instalação).
   grupo, só pelas sessões dele. Envio em dois passos: `preparar_mensagem` grava rascunho comum
   (avisado no canal do dono), `enviar_rascunho` passa por `executarEnvio`, depois do sim dele no
   chat. Criar grupo pede `confirmar: true`. Sem `envio` nas deps, o MCP volta a ser só leitura.
+- Arquivo (1.18.0): sobe por `POST /arquivo` para a tabela `anexos` e vai num rascunho com
+  `anexo_id`, que sai só pelo ok do dono: `reservarEnvio` recusa anexo no envio automático.
 - E-mail e convite de evento (pedido do Lucas, 22/10/2026): saem por ordem dele, e só para
   endereço que ele mesmo digitou (`enderecosDoDono` em `src/controle.ts`, falas `dono` do
   `dialogo` nas últimas 24 h; a trava é `destinatarios` em `src/ferramentas_google.ts`).

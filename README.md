@@ -181,7 +181,14 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   envio ligado, `concluir_compromisso` (feito/descartado) e `anotar_aguardando` (vazio limpa).
   Desde a 1.17.0: `resumo_do_dia` (o texto do resumo da manhã, sem modelo) e, com envio,
   `acompanhar_grupo`. PDF que chega numa conversa tem o texto lido (sem modelo, até 3.000
-  caracteres) e gravado junto do nome do arquivo: entra na busca e na leitura. Desde a 1.13.0
+  caracteres) e gravado junto do nome do arquivo: entra na busca e na leitura.
+  Desde a 1.18.0: `arquivos` lista os documentos, fotos, vídeos e áudios que dá para baixar,
+  e `GET /arquivo/<id>` (mesmo `Authorization` do MCP) entrega o arquivo, buscado na hora pela
+  Evolution. Só vale para o que chegou depois da 1.18.0: antes, a mensagem original (com a
+  chave da mídia) não era guardada. Para **enviar** arquivo: `POST /arquivo` (mesmo `Authorization`,
+  `Content-Type: application/octet-stream`, nome em `X-Nome-Arquivo` codificado em URL, até
+  64 MB) devolve o id do anexo; `preparar_mensagem` com `anexo` faz o rascunho (o texto vira
+  legenda, e o aviso no seu canal mostra 📎) e ele só sai com o seu sim, por `executarEnvio`. Desde a 1.13.0
   também envia, em dois passos: `preparar_mensagem` grava um rascunho (que chega no seu canal,
   onde vale `ok`/veto) e `enviar_rascunho` manda depois do seu sim na sessão; `criar_grupo`
   só cria com `confirmar: true`. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo

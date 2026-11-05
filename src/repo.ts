@@ -1,3 +1,4 @@
+import { TIPOS_DE_ARQUIVO, semMiniatura } from "./arquivos.js";
 import type { Db } from "./db.js";
 import type { MensagemRecebida } from "./whatsapp/evento.js";
 
@@ -53,6 +54,8 @@ export interface Rascunho {
   texto: string;
   pedido: string;
   status: string;
+  /** Arquivo que vai junto, com o texto como legenda (só por pedido do dono). */
+  anexo_id?: number | null;
 }
 
 /**
@@ -94,10 +97,12 @@ export async function garantirContato(
  * não pode virar aviso de compromisso de meses atrás.
  */
 export async function gravarMensagem(db: Db, m: MensagemRecebida, texto: string, extraida = false): Promise<boolean> {
+  // Mídia guarda a mensagem original (sem miniatura): é o que permite baixar o arquivo depois.
+  const midia = TIPOS_DE_ARQUIVO.has(m.tipo) && m.bruto ? JSON.stringify(semMiniatura(m.bruto)) : null;
   const r = await db.query(
-    `INSERT INTO mensagens (id, chat_jid, remetente_jid, remetente_nome, de_mim, tipo, texto, enviada_em, extraida)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
-    [m.id, m.chatJid, m.remetenteJid, m.remetenteNome, m.deMim, m.tipo, texto, m.enviadaEm, extraida],
+    `INSERT INTO mensagens (id, chat_jid, remetente_jid, remetente_nome, de_mim, tipo, texto, enviada_em, extraida, midia)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (id) DO NOTHING`,
+    [m.id, m.chatJid, m.remetenteJid, m.remetenteNome, m.deMim, m.tipo, texto, m.enviadaEm, extraida, midia],
   );
   return (r.rowCount ?? 0) > 0;
 }
@@ -267,6 +272,46 @@ export async function lembrar(db: Db, jid: string, fatos: string[], teto = 4000)
 export async function marcarPromo(db: Db, jid: string): Promise<void> {
   await excluirChat(db, jid, true);
   await db.query("UPDATE contatos SET promo = TRUE WHERE jid = $1", [jid]);
+}
+
+export interface ArquivoGuardado {
+  id: string;
+  chat_jid: string;
+  contato: string;
+  tipo: string;
+  texto: string;
+  de_mim: boolean;
+  enviada_em: Date;
+  midia: unknown;
+}
+
+/**
+ * Os arquivos que dá para baixar (os que chegaram depois da 1.18.0, com a mídia guardada),
+ * do mais novo para o mais antigo. Conversa fora do assistente não aparece.
+ */
+export async function arquivos(
+  db: Db,
+  f: { jid?: string; tipos: string[]; desde?: Date; limite: number },
+): Promise<ArquivoGuardado[]> {
+  const r = await db.query<ArquivoGuardado>(
+    `SELECT m.id, m.chat_jid, ${NOME_SQL} AS contato, m.tipo, m.texto, m.de_mim, m.enviada_em, m.midia
+     FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
+     WHERE m.midia IS NOT NULL AND NOT c.excluido AND m.tipo = ANY($1)
+       AND ($2::text IS NULL OR m.chat_jid = $2) AND ($3::timestamptz IS NULL OR m.enviada_em > $3)
+     ORDER BY m.enviada_em DESC LIMIT $4`,
+    [f.tipos, f.jid ?? null, f.desde ?? null, f.limite],
+  );
+  return r.rows;
+}
+
+export async function lerArquivo(db: Db, id: string): Promise<ArquivoGuardado | null> {
+  const r = await db.query<ArquivoGuardado>(
+    `SELECT m.id, m.chat_jid, ${NOME_SQL} AS contato, m.tipo, m.texto, m.de_mim, m.enviada_em, m.midia
+     FROM mensagens m JOIN contatos c ON c.jid = m.chat_jid
+     WHERE m.id = $1 AND m.midia IS NOT NULL AND NOT c.excluido`,
+    [id],
+  );
+  return r.rows[0] ?? null;
 }
 
 /** Liga ou desliga o acompanhamento de um grupo. Pessoa não tem isso: já é lida sempre. */
@@ -499,23 +544,46 @@ export async function exemplosDoDono(db: Db, chatJid: string | null, limite = 40
   return r.rows.map((x) => x.texto).slice(0, limite);
 }
 
-export async function criarRascunho(db: Db, chatJid: string, texto: string, pedido: string): Promise<number> {
+export async function criarRascunho(db: Db, chatJid: string, texto: string, pedido: string, anexoId: number | null = null): Promise<number> {
   const r = await db.query<{ id: number }>(
-    "INSERT INTO rascunhos (chat_jid, texto, pedido) VALUES ($1,$2,$3) RETURNING id",
-    [chatJid, texto, pedido],
+    "INSERT INTO rascunhos (chat_jid, texto, pedido, anexo_id) VALUES ($1,$2,$3,$4) RETURNING id",
+    [chatJid, texto, pedido, anexoId],
   );
   return r.rows[0].id;
 }
 
+export interface Anexo {
+  id: number;
+  nome: string;
+  mimetype: string;
+  dados: Buffer;
+}
+
+export async function criarAnexo(db: Db, a: { nome: string; mimetype: string; dados: Buffer }): Promise<number> {
+  const r = await db.query<{ id: number }>("INSERT INTO anexos (nome, mimetype, dados) VALUES ($1,$2,$3) RETURNING id", [a.nome, a.mimetype, a.dados]);
+  return r.rows[0].id;
+}
+
+export async function lerAnexo(db: Db, id: number): Promise<Anexo | null> {
+  const r = await db.query<Anexo>("SELECT id, nome, mimetype, dados FROM anexos WHERE id = $1", [id]);
+  return r.rows[0] ?? null;
+}
+
+/** Só o nome e o tamanho, para mostrar ao dono sem carregar o arquivo. */
+export async function descreverAnexo(db: Db, id: number): Promise<{ nome: string; tamanho: number } | null> {
+  const r = await db.query<{ nome: string; tamanho: number }>("SELECT nome, length(dados)::int AS tamanho FROM anexos WHERE id = $1", [id]);
+  return r.rows[0] ?? null;
+}
+
 export async function lerRascunho(db: Db, id: number): Promise<Rascunho | null> {
-  const r = await db.query<Rascunho>("SELECT id, chat_jid, texto, pedido, status FROM rascunhos WHERE id = $1", [id]);
+  const r = await db.query<Rascunho>("SELECT id, chat_jid, texto, pedido, status, anexo_id FROM rascunhos WHERE id = $1", [id]);
   return r.rows[0] ?? null;
 }
 
 /** Os rascunhos aguardando, do mais novo ao mais velho. */
 export async function rascunhosAguardando(db: Db, limite = 10): Promise<Rascunho[]> {
   const r = await db.query<Rascunho>(
-    "SELECT id, chat_jid, texto, pedido, status FROM rascunhos WHERE status = 'aguardando' ORDER BY id DESC LIMIT $1",
+    "SELECT id, chat_jid, texto, pedido, status, anexo_id FROM rascunhos WHERE status = 'aguardando' ORDER BY id DESC LIMIT $1",
     [limite],
   );
   return r.rows;
@@ -554,20 +622,22 @@ export async function reservarEnvio(
   db: Db,
   id: number,
   auto?: EnvioAutomatico,
-): Promise<{ chat_jid: string; texto: string } | null> {
-  const r = await db.query<{ chat_jid: string; texto: string }>(
+): Promise<{ chat_jid: string; texto: string; anexo_id: number | null } | null> {
+  const r = await db.query<{ chat_jid: string; texto: string; anexo_id: number | null }>(
     `UPDATE rascunhos r SET status = 'enviado', decidido_em = now(), enviar_em = NULL
      FROM contatos c
      WHERE r.id = $1 AND r.status = 'aguardando' AND c.jid = r.chat_jid AND NOT c.excluido
        AND r.texto !~* '\\[preencher:'
        AND ($2::int IS NULL OR (
+         -- Anexo só sai pelo ok do dono, nunca pela autonomia.
+         r.anexo_id IS NULL AND
          NOT c.grupo AND NOT r.ajustado AND r.risco = 'baixo'
          AND COALESCE(c.autonomia, $3::int) >= $2::int
          AND (NOT $4::boolean OR (r.enviar_em IS NOT NULL AND r.enviar_em <= $5::timestamptz))
          AND NOT EXISTS (SELECT 1 FROM estado WHERE chave = 'autonomia:pausada' AND valor = '1')
          AND NOT EXISTS (SELECT 1 FROM mensagens m WHERE m.chat_jid = r.chat_jid AND m.de_mim AND m.enviada_em > r.criado_em)
        ))
-     RETURNING r.chat_jid, r.texto`,
+     RETURNING r.chat_jid, r.texto, r.anexo_id`,
     [id, auto?.nivelMinimo ?? null, auto?.padrao ?? 0, auto?.agendado ?? false, auto?.agora ?? new Date()],
   );
   return r.rows[0] ?? null;
@@ -589,6 +659,11 @@ export async function apagarAntigas(db: Db, dias: number): Promise<number> {
   // O chat de controle vale como memória de curto prazo; o que importa dele vai para o caderno.
   await db.query("DELETE FROM dialogo WHERE criado_em < now() - interval '14 days'");
   await db.query("DELETE FROM consumo WHERE criado_em < now() - interval '180 days'");
+  // Anexo de rascunho que ainda espera fica; o resto sai depois de 30 dias.
+  await db.query(
+    `DELETE FROM anexos a WHERE a.criado_em < now() - interval '30 days'
+       AND NOT EXISTS (SELECT 1 FROM rascunhos r WHERE r.anexo_id = a.id AND r.status = 'aguardando')`,
+  );
   return r.rowCount ?? 0;
 }
 

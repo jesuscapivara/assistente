@@ -85,6 +85,10 @@ class WhatsFalso implements Evolution {
     this.enviadas.push({ destino, texto: `[imagem ${url}] ${legenda}` });
     return `I${this.enviadas.length}`;
   }
+  async enviarArquivo(destino: string, a: { nome: string }, legenda: string) {
+    this.enviadas.push({ destino, texto: `[arquivo ${a.nome}] ${legenda}` });
+    return `D${this.enviadas.length}`;
+  }
   async criarGrupo(nome: string, participantes: string[]) {
     this.enviadas.push({ destino: participantes.join(","), texto: `[grupo ${nome}]` });
     return "120363000000000001@g.us";

@@ -346,7 +346,12 @@ export async function executarEnvio(
   const reservado = await repo.reservarEnvio(deps.db, r.id, auto);
   if (!reservado) return false;
   try {
-    const mensagemId = await deps.evolution.enviarTexto(reservado.chat_jid, reservado.texto);
+    const anexo = reservado.anexo_id ? await repo.lerAnexo(deps.db, reservado.anexo_id) : null;
+    // Anexo apagado (passou dos 30 dias) não vira só texto sem o dono saber.
+    if (reservado.anexo_id && !anexo) throw new Error("o anexo não existe mais; prepare de novo");
+    const mensagemId = anexo
+      ? await deps.evolution.enviarArquivo(reservado.chat_jid, anexo, reservado.texto)
+      : await deps.evolution.enviarTexto(reservado.chat_jid, reservado.texto);
     // O id separa esta mensagem das que ele escreveu à mão: só as dele ensinam estilo.
     if (mensagemId) await deps.db.query("UPDATE rascunhos SET mensagem_id = $2 WHERE id = $1", [r.id, mensagemId]);
     // A Evolution GO não devolve pelo webhook o que a API envia: sem gravar aqui, a
@@ -361,13 +366,13 @@ export async function executarEnvio(
         remetenteNome: null,
         deMim: true,
         grupo: false,
-        tipo: "texto",
+        tipo: anexo ? (anexo.mimetype.startsWith("image/") ? "imagem" : "documento") : "texto",
         texto: reservado.texto,
         enviadaEm: new Date(),
         bruto: {},
         jidAlternativo: null,
       },
-      reservado.texto,
+      anexo ? `[arquivo: ${anexo.nome}]${reservado.texto ? ` ${reservado.texto}` : ""}` : reservado.texto,
       true,
     );
     await repo.donoRespondeu(deps.db, reservado.chat_jid);

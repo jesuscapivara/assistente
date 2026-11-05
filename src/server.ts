@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { tratarMcp, type DepsMcp } from "./mcp.js";
-import { lerImagem } from "./midia.js";
+import { lerArquivoGuardado } from "./midia.js";
 import { voltaSegura } from "./painel.js";
 
 function tokenConfere(recebido: string, esperado: string): boolean {
@@ -9,6 +9,9 @@ function tokenConfere(recebido: string, esperado: string): boolean {
   const b = Buffer.from(esperado);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/** O WhatsApp aceita documento até ~100 MB; aqui o limite é menor, porque o anexo fica no banco. */
+export const LIMITE_ANEXO = 64 * 1024 * 1024;
 
 export function ocultarToken(url: string): string {
   return url.replace(/^\/(webhook|painel|midia)\/[^/?#]+/, "/$1/***");
@@ -31,6 +34,13 @@ export function criarServidor(opts: {
   aoEvento(payload: unknown): Promise<unknown>;
   painel?: OpcoesPainel;
   mcp?: { token: string } & DepsMcp;
+  /** Download dos arquivos das conversas, com o mesmo token do MCP no cabeçalho. */
+  arquivos?: {
+    token: string;
+    baixar(id: string): Promise<{ buffer: Buffer; mimetype: string; nome: string } | null>;
+    /** Guarda um arquivo para anexar a um rascunho; devolve o id do anexo. */
+    receber?(a: { dados: Buffer; nome: string }): Promise<{ id: number; nome: string; mimetype: string }>;
+  };
 }): FastifyInstance {
   const app = Fastify({
     logger: {
@@ -50,11 +60,11 @@ export function criarServidor(opts: {
 
   app.get("/saude", async () => ({ ok: true }));
 
-  // O cartão do resumo, buscado pela Evolution na hora do envio (ver midia.ts).
+  // O cartão do resumo e os anexos aprovados, buscados pela Evolution na hora do envio (ver midia.ts).
   app.get<{ Params: { id: string } }>("/midia/:id", async (req, reply) => {
-    const png = lerImagem(req.params.id.replace(/\.png$/, ""));
-    if (!png) return reply.code(404).send();
-    return reply.header("Cache-Control", "no-store").type("image/png").send(png);
+    const a = lerArquivoGuardado(req.params.id.replace(/\.[a-z0-9]+$/i, ""));
+    if (!a) return reply.code(404).send();
+    return reply.header("Cache-Control", "no-store").type(a.tipo).send(a.dados);
   });
 
   app.post<{ Params: { token: string } }>("/webhook/:token", async (req, reply) => {
@@ -107,6 +117,47 @@ export function criarServidor(opts: {
     });
     // Sem sessão nem SSE: o GET (fluxo de eventos do servidor) não existe aqui.
     app.get("/mcp", async (_req, reply) => reply.code(405).header("Allow", "POST").send());
+  }
+
+  const arquivos = opts.arquivos;
+  if (arquivos) {
+    const autorizado = (req: { headers: Record<string, unknown> }) => {
+      const auth = String(req.headers.authorization ?? "");
+      return auth.startsWith("Bearer ") && tokenConfere(auth.slice(7).trim(), arquivos.token);
+    };
+    // Upload em binário puro; o nome vai no cabeçalho X-Nome-Arquivo (codificado), não no
+    // caminho, para não ir ao log.
+    app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, corpo, feito) => feito(null, corpo));
+    app.post("/arquivo", async (req, reply) => {
+      if (!autorizado(req)) return reply.code(401).send({ error: "unauthorized" });
+      if (!arquivos.receber) return reply.code(404).send();
+      const dados = req.body;
+      if (!Buffer.isBuffer(dados) || !dados.length) return reply.code(400).send({ error: "mande o arquivo como application/octet-stream" });
+      if (dados.length > LIMITE_ANEXO) return reply.code(413).send({ error: "arquivo acima de 64 MB" });
+      let nome = "";
+      try {
+        nome = decodeURIComponent(String(req.headers["x-nome-arquivo"] ?? "")).trim();
+      } catch {
+        return reply.code(400).send({ error: "X-Nome-Arquivo mal codificado" });
+      }
+      if (!nome) return reply.code(400).send({ error: "falta o cabeçalho X-Nome-Arquivo" });
+      return arquivos.receber({ dados, nome });
+    });
+    // Token no cabeçalho, como o MCP: no caminho iria para o log.
+    app.get<{ Params: { id: string } }>("/arquivo/:id", async (req, reply) => {
+      if (!autorizado(req)) return reply.code(401).send({ error: "unauthorized" });
+      const a = await arquivos.baixar(req.params.id).catch((err) => {
+        req.log.warn({ err: String(err).slice(0, 200) }, "download do arquivo falhou");
+        return undefined;
+      });
+      if (a === null) return reply.code(404).send({ error: "arquivo não encontrado" });
+      if (!a) return reply.code(502).send({ error: "o WhatsApp não entregou o arquivo (pode ter expirado)" });
+      return reply
+        .header("Cache-Control", "no-store")
+        .header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(a.nome)}`)
+        .type(a.mimetype || "application/octet-stream")
+        .send(a.buffer);
+    });
   }
 
   return app;

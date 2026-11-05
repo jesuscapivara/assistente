@@ -25,6 +25,10 @@ class EnvioFalso {
       return `E${this.enviadas.length}`;
     },
     enviarImagem: async () => null,
+    enviarArquivo: async (destino: string, a: { nome: string }, legenda: string) => {
+      this.enviadas.push({ destino, texto: `[arquivo ${a.nome}] ${legenda}` });
+      return `D${this.enviadas.length}`;
+    },
     criarGrupo: async (nome: string, participantes: string[]) => {
       this.grupos.push({ nome, participantes });
       return "120363000000000009@g.us";
@@ -74,7 +78,7 @@ describe("protocolo do MCP", () => {
     expect((await chamar(app, { jsonrpc: "2.0", method: "notifications/initialized" })).statusCode).toBe(202);
 
     const lista = (await chamar(app, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
-    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "exportar", "interesses", "ler_conversa", "novidades", "pendencias"]);
+    expect(lista.map((t: any) => t.name).sort()).toEqual(["arquivos", "buscar_contato", "buscar_mensagens", "conversas_recentes", "exportar", "interesses", "ler_conversa", "novidades", "pendencias"]);
     expect(lista.every((t: any) => t.annotations.readOnlyHint && t.inputSchema.type === "object")).toBe(true);
     // Nada que envie: o envio só sai por executarEnvio, com as travas.
     expect(lista.some((t: any) => /envi|respond|propor/.test(t.name))).toBe(false);

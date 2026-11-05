@@ -1,3 +1,6 @@
+import { tipoDeEnvio } from "../arquivos.js";
+import { guardarArquivo } from "../midia.js";
+
 /**
  * Cliente mínimo da Evolution GO para a instância do dono. O contrato é o que o
  * KoreOS já usa em produção (`services/evolutionApiService.js`): header `apikey` com
@@ -8,6 +11,8 @@ export interface Evolution {
   enviarTexto(destino: string, texto: string): Promise<string | null>;
   /** Imagem por URL (o engine baixa e envia), com legenda. */
   enviarImagem(destino: string, url: string, legenda: string): Promise<string | null>;
+  /** Arquivo (documento, foto, vídeo, áudio) com legenda, servido ao engine pela rede interna. */
+  enviarArquivo(destino: string, arquivo: { dados: Buffer; nome: string; mimetype: string }, legenda: string): Promise<string | null>;
   /** Cria um grupo com o dono e os participantes (jids); devolve o jid do grupo. */
   criarGrupo(nome: string, participantes: string[]): Promise<string>;
   /** A agenda do celular sincronizada no engine: o nome que o dono deu a cada número. */
@@ -28,7 +33,11 @@ export interface GrupoDoDono {
   nome: string | null;
 }
 
-export function criarEvolution(baseUrl: string, tokenInstancia: string, fetcher: typeof fetch = fetch): Evolution {
+/**
+ * `urlInterna`: onde o engine alcança o assistente (rede do Docker), para buscar o arquivo
+ * que vai ser enviado. Sem ela, envio de arquivo falha com aviso.
+ */
+export function criarEvolution(baseUrl: string, tokenInstancia: string, fetcher: typeof fetch = fetch, urlInterna?: string): Evolution {
   const base = baseUrl.replace(/\/+$/, "");
 
   async function chamar(caminho: string, corpo: unknown, timeoutMs = 20_000, metodo: "GET" | "POST" = "POST"): Promise<unknown> {
@@ -54,6 +63,17 @@ export function criarEvolution(baseUrl: string, tokenInstancia: string, fetcher:
     },
     async enviarImagem(destino, url, legenda) {
       const raw = await chamar("/send/media", { number: destino, url, type: "image", caption: legenda, filename: "resumo.png" }, 45_000);
+      return idDaResposta(raw);
+    },
+    async enviarArquivo(destino, arquivo, legenda) {
+      if (!urlInterna) throw new Error("sem URL interna para servir o arquivo ao engine");
+      const ext = arquivo.nome.includes(".") ? `.${arquivo.nome.split(".").pop()!.replace(/[^a-z0-9]/gi, "")}` : "";
+      const url = `${urlInterna}/midia/${guardarArquivo(arquivo.dados, arquivo.mimetype)}${ext}`;
+      const raw = await chamar(
+        "/send/media",
+        { number: destino, url, type: tipoDeEnvio(arquivo.mimetype), caption: legenda, filename: arquivo.nome },
+        120_000,
+      );
       return idDaResposta(raw);
     },
     async criarGrupo(nome, participantes) {

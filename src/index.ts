@@ -3,6 +3,7 @@ import { enviarAgendados, responderSozinho } from "./autonomia.js";
 import { desenharCartao, planoDoCartao } from "./cartao.js";
 import { expediente, googleLigado, jidsDoDono, lerConfig, urlInterna } from "./config.js";
 import { estudar } from "./conhecer.js";
+import { mimeDaMidia, mimePeloNome, nomeDoArquivo } from "./arquivos.js";
 import { textoDoPdf } from "./documento.js";
 import { registrarUso } from "./consumo.js";
 import { depsDaPauta, NIVEIS, responderPedido, tratarComando, type DepsControle } from "./controle.js";
@@ -32,7 +33,7 @@ const cfg = lerConfig();
 const db = abrirDb(cfg.DATABASE_URL);
 const aplicadas = await migrar(db);
 
-const evolution = criarEvolution(cfg.EVOLUTION_API_URL, cfg.EVOLUTION_INSTANCE_TOKEN);
+const evolution = criarEvolution(cfg.EVOLUTION_API_URL, cfg.EVOLUTION_INSTANCE_TOKEN, fetch, urlInterna(cfg));
 const ia = criarIa({
   modelo: cfg.MODELO,
   modeloExtracao: cfg.MODELO_EXTRACAO,
@@ -237,6 +238,21 @@ const app = criarServidor({
         envio: { evolution, avisar },
         // Mesmo texto do resumo da manhã, sem modelo; não grava a pauta das letras.
         resumo: async () => (await montarResumo(base)).texto,
+      }
+    : undefined,
+  arquivos: cfg.MCP_TOKEN
+    ? {
+        token: cfg.MCP_TOKEN,
+        baixar: async (id) => {
+          const a = await repo.lerArquivo(db, id);
+          if (!a) return null;
+          const b = await evolution.baixarMidia(a.midia as Record<string, unknown>);
+          return { ...b, nome: nomeDoArquivo(a, b.mimetype || mimeDaMidia(a.midia)) };
+        },
+        receber: async ({ dados, nome }) => {
+          const mimetype = mimePeloNome(nome);
+          return { id: await repo.criarAnexo(db, { nome, mimetype, dados }), nome, mimetype };
+        },
       }
     : undefined,
   painel: cfg.PAINEL_TOKEN
