@@ -27,6 +27,8 @@ export interface DepsMcp {
   db: Db;
   dono: string;
   fuso: string;
+  /** O texto do resumo da manhã, montado na hora (sem modelo). Sem isto, `resumo_do_dia` não existe. */
+  resumo?: () => Promise<string>;
   /** Sem isto, o MCP é só de leitura. */
   envio?: { evolution: Evolution; avisar(texto: string): Promise<void> };
 }
@@ -61,6 +63,8 @@ interface Ferramenta<T extends z.ZodType> {
   envia?: boolean;
   /** Muda o que o assistente guarda (interesses, grupo de promoção): também só com `envio`. */
   escreve?: boolean;
+  /** Precisa do resumo nas deps. */
+  usaResumo?: boolean;
   rodar(args: z.infer<T>, deps: DepsMcp): Promise<string>;
 }
 
@@ -264,6 +268,28 @@ const FERRAMENTAS = [
     },
   }),
   ferramenta({
+    nome: "resumo_do_dia",
+    descricao: "O panorama do dia, o mesmo texto do resumo da manhã: agenda, quem espera resposta (e o que ficou para trás), compromissos, cobranças, tarefas e contas do KoreOS. Uma chamada, sem modelo.",
+    usaResumo: true,
+    entrada: z.object({}),
+    async rodar(_args, deps) {
+      return deps.resumo!();
+    },
+  }),
+  ferramenta({
+    nome: "acompanhar_grupo",
+    descricao: "Liga (ou desliga) o acompanhamento de um grupo: o assistente passa a ler tudo o que chega nele, não só quando citam o dono, e descreve as fotos. Para grupos de obra e de projeto.",
+    escreve: true,
+    entrada: z.object({ grupo: z.string().min(1).describe("nome ou jid do grupo"), acompanhar: z.boolean().default(true) }),
+    async rodar({ grupo, acompanhar }, deps) {
+      const c = await acharConversa(deps.db, grupo);
+      if (typeof c === "string") return c;
+      if (!c.grupo) return `${repo.nomeDe(c)} não é grupo (conversa individual já é lida sempre).`;
+      await repo.acompanharGrupo(deps.db, c.jid, acompanhar);
+      return acompanhar ? `Acompanhando ${repo.nomeDe(c)}.` : `${repo.nomeDe(c)} volta a ser lido só quando citam o dono.`;
+    },
+  }),
+  ferramenta({
     nome: "exportar",
     descricao: "Tudo o que o assistente sabe de cada conversa, em JSON: ficha (relação, quem é, assuntos, situação, fatos), o que o dono espera da pessoa, compromissos e datas. Feita para script que gera anotações sem modelo; para ler, prefira buscar_contato.",
     entrada: z.object({ dias: z.number().int().min(1).max(400).default(120).describe("compromissos já fechados desde quantos dias") }),
@@ -357,7 +383,7 @@ const FERRAMENTAS = [
 
 /** As de envio só existem quando o servidor recebeu como enviar. */
 function disponiveis(deps: DepsMcp) {
-  return FERRAMENTAS.filter((f) => !(f.envia || f.escreve) || deps.envio);
+  return FERRAMENTAS.filter((f) => (!(f.envia || f.escreve) || deps.envio) && (!f.usaResumo || deps.resumo));
 }
 
 type Pedido = { jsonrpc?: string; id?: string | number | null; method?: string; params?: any };

@@ -90,6 +90,7 @@ Tudo acontece no seu chat consigo mesmo ("mensagem para você"); o que ele escre
 | `estuda` | atualiza agora as fichas e o seu retrato |
 | `fora Grupo da Família` · `volta Grupo da Família` | tira (e apaga) ou devolve uma conversa |
 | `promo Emipe Promoções` | grupo de promoção: sai do assistente (como o `fora`), mas cada oferta passa pelos seus interesses |
+| `acompanha Obra Largo do Rosário` · `solta Obra Largo do Rosário` | grupo de obra ou projeto lido sempre (não só quando citam você), com as fotos descritas |
 | `interesse monitor 27 até 900` · `interesses` · `esquece interesse 2` | avisa quando sair oferta com todas as palavras (`-palavra` exclui) e até o teto; a lista mostra os grupos vigiados e o que já bateu |
 | `resolvi B` · `adia B sábado` · `ignora B` · `responde B <o quê>` · `cobra B` | pelas letras do último resumo (cartão ou texto). `resolvi` é para o que você resolveu por fora (ligação, pessoalmente), que o WhatsApp não vê; `adia` aceita amanhã, sábado, 3 dias, 25/10, e a pessoa volta antes se escrever; `ignora` tira e ensina que aquilo não pedia resposta. Frase livre também vale: "já liguei pro Bruno" |
 | `errado 1 quem vai ler é ele` | corrige o compromisso 1 e aprende para as próximas leituras; para o resto, diga com suas palavras ("a Thaís é notificação do KoreOS") |
@@ -177,7 +178,10 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   `remover_interesse` e `marcar_promocao` (pede `confirmar: true`); `interesses` lista.
   Desde a 1.16.0: `exportar` devolve em JSON tudo o que o assistente sabe de cada conversa
   (ficha, espera, compromissos, datas), para gerar anotações por script, sem modelo; e, com
-  envio ligado, `concluir_compromisso` (feito/descartado) e `anotar_aguardando` (vazio limpa). Desde a 1.13.0
+  envio ligado, `concluir_compromisso` (feito/descartado) e `anotar_aguardando` (vazio limpa).
+  Desde a 1.17.0: `resumo_do_dia` (o texto do resumo da manhã, sem modelo) e, com envio,
+  `acompanhar_grupo`. PDF que chega numa conversa tem o texto lido (sem modelo, até 3.000
+  caracteres) e gravado junto do nome do arquivo: entra na busca e na leitura. Desde a 1.13.0
   também envia, em dois passos: `preparar_mensagem` grava um rascunho (que chega no seu canal,
   onde vale `ok`/veto) e `enviar_rascunho` manda depois do seu sim na sessão; `criar_grupo`
   só cria com `confirmar: true`. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo

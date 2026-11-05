@@ -233,6 +233,18 @@ describe.skipIf(!URL_TESTE)("fluxo com banco", () => {
     await extrairChat({ ...deps, quietoMin: 0, mencoes: ["Lucas"] }, GRUPO);
     expect(ia.extracoes).toHaveLength(1);
 
+    // Grupo acompanhado é lido mesmo sem citar o dono; solto, volta a pular.
+    expect(await repo.acompanharGrupo(db, GRUPO, true)).toBe(true);
+    await ing(msg(GRUPO, "concretagem da laje mudou para sexta", { grupo: true, quando: new Date(Date.now() - 400_000).toISOString() }));
+    await extrairChat({ ...deps, quietoMin: 0, mencoes: ["Lucas"] }, GRUPO);
+    expect(ia.extracoes).toHaveLength(2);
+    await repo.acompanharGrupo(db, GRUPO, false);
+    await ing(msg(GRUPO, "e o almoço?", { grupo: true, quando: new Date(Date.now() - 300_000).toISOString() }));
+    await extrairChat({ ...deps, quietoMin: 0, mencoes: ["Lucas"] }, GRUPO);
+    expect(ia.extracoes).toHaveLength(2);
+    // Pessoa não é "acompanhada": já é lida sempre.
+    expect(await repo.acompanharGrupo(db, FERNANDA, true)).toBe(false);
+
     await ing(msg(JOAO, "Seu código de acesso é 123. Confirma?", { quando: new Date(Date.now() - 600_000).toISOString() }));
     ia.resposta = { ...ia.resposta, precisa_resposta: true, automatica: true, situacao: "" };
     await extrairChat({ ...deps, quietoMin: 0 }, JOAO);

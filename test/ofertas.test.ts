@@ -56,6 +56,10 @@ describe("regra das ofertas", () => {
     ["esquece interesse 3", { tipo: "esquecerInteresse", id: 3 }],
     ["promo Emipe Promoções", { tipo: "promo", nome: "Emipe Promoções" }],
     ["esquece 4", { tipo: "esquecer", id: 4 }],
+    ["acompanha Obra Largo do Rosário", { tipo: "acompanhar", nome: "Obra Largo do Rosário", sim: true }],
+    ["acompanhar o grupo HIRO", { tipo: "acompanhar", nome: "HIRO", sim: true }],
+    ["solta Obra Largo do Rosário", { tipo: "acompanhar", nome: "Obra Largo do Rosário", sim: false }],
+    ["deixa de acompanhar HIRO", { tipo: "acompanhar", nome: "HIRO", sim: false }],
   ])("comando: %s", (texto, esperado) => {
     expect(lerComando(texto)).toEqual(esperado);
   });
@@ -137,5 +141,31 @@ describe.skipIf(!URL_TESTE)("ofertas com banco", () => {
     await repo.excluirChat(db, GRUPO, false);
     expect(await oferta("agora grava")).toBe("gravado");
     expect(await repo.gruposDePromo(db)).toEqual([]);
+  });
+  it("foto só é lida em conversa individual ou grupo acompanhado, e PDF sempre", async () => {
+    const lidas: string[] = [];
+    const pdfs: string[] = [];
+    const evento = (chat: string, grupo: boolean, message: object) =>
+      ingerir(
+        { event: "Message", data: { Info: { ID: `F${++seq}`, Chat: chat, Sender: "5551988888888@s.whatsapp.net", PushName: "Mestre", IsFromMe: false, IsGroup: grupo, Timestamp: new Date().toISOString() }, Message: message } },
+        {
+          db,
+          jidsDoDono: new Set([DONO]),
+          aoComando: async () => {},
+          aoImagem: async (m) => void lidas.push(m.id),
+          aoDocumento: async (m) => void pdfs.push(m.texto),
+        },
+      );
+    const foto = { imageMessage: { caption: "laje" } };
+    await evento(GRUPO, true, foto);
+    expect(lidas).toHaveLength(0);
+    await repo.acompanharGrupo(db, GRUPO, true);
+    await evento(GRUPO, true, foto);
+    expect(lidas).toHaveLength(1);
+
+    await evento(GRUPO, true, { documentMessage: { fileName: "Proposta Obra.pdf" } });
+    await evento(GRUPO, true, { documentMessage: { fileName: "planta.dwg" } });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(pdfs).toEqual(["[arquivo: Proposta Obra.pdf]"]);
   });
 });

@@ -1,4 +1,5 @@
 import type { Db } from "./db.js";
+import { ehPdf } from "./documento.js";
 import * as repo from "./repo.js";
 import { lerHistorico, lerMensagem, tipoDoEvento, type MensagemRecebida } from "./whatsapp/evento.js";
 
@@ -13,6 +14,8 @@ export interface DepsIngestao {
   aoAudio?(msg: MensagemRecebida): Promise<void>;
   /** Foto recebida numa conversa individual: descreve em segundo plano, para a leitura e a resposta. */
   aoImagem?(msg: MensagemRecebida): Promise<void>;
+  /** PDF recebido ou enviado numa conversa: lê o texto em segundo plano, para a busca e a leitura. */
+  aoDocumento?(msg: MensagemRecebida): Promise<void>;
   /** Mensagem de grupo de promoção: não é gravada, só comparada com os interesses do dono. */
   aoOferta?(chatJid: string, grupo: string, texto: string): Promise<void>;
   /** Histórico gravado: hora de conhecer as pessoas. */
@@ -80,9 +83,13 @@ export async function ingerir(payload: unknown, deps: DepsIngestao): Promise<Res
   if (m.tipo === "audio" && deps.aoAudio) {
     void deps.aoAudio(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "transcrição falhou"));
   }
-  // Foto de contato, em conversa individual: em grupo seria custo sem retorno.
-  if (m.tipo === "imagem" && !m.grupo && !m.deMim && deps.aoImagem) {
+  // Foto de contato, em conversa individual ou grupo acompanhado: nos outros grupos seria
+  // custo sem retorno.
+  if (m.tipo === "imagem" && (!m.grupo || contato.acompanhado) && !m.deMim && deps.aoImagem) {
     void deps.aoImagem(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "leitura da foto falhou"));
+  }
+  if (m.tipo === "documento" && ehPdf(texto) && deps.aoDocumento) {
+    void deps.aoDocumento(m).catch((err) => deps.log?.({ err: String(err), id: m.id }, "leitura do PDF falhou"));
   }
   return "gravado";
 }

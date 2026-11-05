@@ -3,6 +3,7 @@ import { enviarAgendados, responderSozinho } from "./autonomia.js";
 import { desenharCartao, planoDoCartao } from "./cartao.js";
 import { expediente, googleLigado, jidsDoDono, lerConfig, urlInterna } from "./config.js";
 import { estudar } from "./conhecer.js";
+import { textoDoPdf } from "./documento.js";
 import { registrarUso } from "./consumo.js";
 import { depsDaPauta, NIVEIS, responderPedido, tratarComando, type DepsControle } from "./controle.js";
 import { corrigirLeitura } from "./corrigir.js";
@@ -21,7 +22,7 @@ import { ingerir } from "./ingestao.js";
 import { comandoDoPainel, paginaDoPainel } from "./painel.js";
 import { briefings, cobrancas, fimDoDia, lembretesNaHora, revisaoSemanal } from "./proativo.js";
 import * as repo from "./repo.js";
-import { assuntoDe, coletarDia, diasEsperando, ficouParaTras, resumoEmTexto } from "./resumo.js";
+import { assuntoDe, coletarDia, diasEsperando, ficouParaTras, montarResumo, resumoEmTexto } from "./resumo.js";
 import { criarServidor } from "./server.js";
 import { criarTelegram } from "./telegram.js";
 import { transcrever } from "./transcricao.js";
@@ -216,6 +217,10 @@ const app = criarServidor({
         const d = await ia.verImagem(await evolution.baixarMidia(msg.bruto), msg.texto);
         if (d) await db.query("UPDATE mensagens SET texto = $2 WHERE id = $1", [msg.id, `[foto: ${d}]${msg.texto ? ` ${msg.texto}` : ""}`]);
       },
+      aoDocumento: async (msg) => {
+        const texto = await textoDoPdf((await evolution.baixarMidia(msg.bruto)).buffer);
+        if (texto) await db.query("UPDATE mensagens SET texto = $2 WHERE id = $1", [msg.id, `${msg.texto} [texto do PDF: ${texto}]`]);
+      },
       aoOferta: async (jid, grupo, texto) => {
         const aviso = await avaliarOferta(db, jid, grupo, texto);
         if (aviso) await avisar(aviso);
@@ -223,7 +228,17 @@ const app = criarServidor({
       aoHistorico: async (n) => agendarEstudoDoHistorico(n),
       log,
     }),
-  mcp: cfg.MCP_TOKEN ? { token: cfg.MCP_TOKEN, db, dono: cfg.DONO_NOME, fuso: cfg.FUSO, envio: { evolution, avisar } } : undefined,
+  mcp: cfg.MCP_TOKEN
+    ? {
+        token: cfg.MCP_TOKEN,
+        db,
+        dono: cfg.DONO_NOME,
+        fuso: cfg.FUSO,
+        envio: { evolution, avisar },
+        // Mesmo texto do resumo da manhã, sem modelo; não grava a pauta das letras.
+        resumo: async () => (await montarResumo(base)).texto,
+      }
+    : undefined,
   painel: cfg.PAINEL_TOKEN
     ? {
         token: cfg.PAINEL_TOKEN,

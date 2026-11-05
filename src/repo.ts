@@ -20,10 +20,12 @@ export interface Contato {
   sugestoes: string;
   /** Grupo de promoção: fora do assistente, só passa pelas ofertas. */
   promo: boolean;
+  /** Grupo lido sempre (obra, projeto), não só quando cita o dono; as fotos são descritas. */
+  acompanhado: boolean;
 }
 
 const COLUNAS_CONTATO =
-  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema, sugestoes, promo";
+  "jid, nome, nome_push, grupo, excluido, memoria, relacao, resumo, tom, assuntos_abertos, aguardando, autonomia, situacao, espera_resposta, sistema, sugestoes, promo, acompanhado";
 
 export interface Mensagem {
   id: string;
@@ -265,6 +267,17 @@ export async function lembrar(db: Db, jid: string, fatos: string[], teto = 4000)
 export async function marcarPromo(db: Db, jid: string): Promise<void> {
   await excluirChat(db, jid, true);
   await db.query("UPDATE contatos SET promo = TRUE WHERE jid = $1", [jid]);
+}
+
+/** Liga ou desliga o acompanhamento de um grupo. Pessoa não tem isso: já é lida sempre. */
+export async function acompanharGrupo(db: Db, jid: string, sim: boolean): Promise<boolean> {
+  const r = await db.query("UPDATE contatos SET acompanhado = $2 WHERE jid = $1 AND grupo AND NOT excluido", [jid, sim]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+export async function gruposAcompanhados(db: Db): Promise<string[]> {
+  const r = await db.query<{ nome: string }>(`SELECT ${NOME_SQL} AS nome FROM contatos c WHERE c.acompanhado AND NOT c.excluido ORDER BY 1`);
+  return r.rows.map((x) => x.nome);
 }
 
 /** Os nomes dos grupos de promoção vigiados. */

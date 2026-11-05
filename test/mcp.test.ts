@@ -84,9 +84,21 @@ describe("protocolo do MCP", () => {
     const comEnvio = servidor({} as Db, new EnvioFalso());
     const lista = (await chamar(comEnvio, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
     const envio = lista.filter((t: any) => !t.annotations.readOnlyHint).map((t: any) => t.name).sort();
-    expect(envio).toEqual(["adicionar_interesse", "anotar_aguardando", "concluir_compromisso", "criar_grupo", "enviar_rascunho", "marcar_promocao", "preparar_mensagem", "remover_interesse"]);
+    expect(envio).toEqual(["acompanhar_grupo", "adicionar_interesse", "anotar_aguardando", "concluir_compromisso", "criar_grupo", "enviar_rascunho", "marcar_promocao", "preparar_mensagem", "remover_interesse"]);
     const ini = (await chamar(comEnvio, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).json();
     expect(ini.result.instructions).toMatch(/só depois do sim dele/);
+  });
+
+  it("resumo_do_dia só existe com o resumo nas deps e devolve o texto dele", async () => {
+    const semResumo = (await chamar(app, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
+    expect(semResumo.some((t: any) => t.name === "resumo_do_dia")).toBe(false);
+    const comResumo = criarServidor({
+      webhookToken: "w".repeat(20),
+      aoEvento: async () => {},
+      mcp: { token: TOKEN, db: {} as Db, dono: "Lucas", fuso: "America/Sao_Paulo", resumo: async () => "☀️ Bom dia, Lucas" },
+    });
+    const r = await chamar(comResumo, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "resumo_do_dia", arguments: {} } });
+    expect(r.json().result.content[0].text).toBe("☀️ Bom dia, Lucas");
   });
 
   it("devolve erro de JSON-RPC para método e ferramenta desconhecidos, e erro de ferramenta para parâmetro ruim", async () => {

@@ -80,10 +80,11 @@ export async function extrairChat(deps: DepsExtracao, jid: string): Promise<void
   const novas = pendentes.slice(-MAX_NOVAS);
 
   // Sem modelo quando não há o que ler: "ok", "kkk", figurinha, ou grupo que não envolve
-  // o dono. O "tá ok" do outro também encerra o assunto: ninguém ali espera resposta.
+  // o dono (menos o acompanhado, que o dono pediu para ler sempre). O "tá ok" do outro
+  // também encerra o assunto: ninguém ali espera resposta.
   const ultimaNova = novas[novas.length - 1];
   const vazio = novas.every(semConteudo);
-  if (vazio || (contato.grupo && !grupoEnvolveDono(novas, deps.mencoes ?? []))) {
+  if (vazio || (contato.grupo && !contato.acompanhado && !grupoEnvolveDono(novas, deps.mencoes ?? []))) {
     if (vazio && !contato.grupo && !ultimaNova.de_mim) await repo.donoRespondeu(db, jid);
     await repo.marcarExtraidas(db, jid, ate);
     return;

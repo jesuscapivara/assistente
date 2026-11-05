@@ -55,6 +55,7 @@ export type Comando =
   | { tipo: "excluir"; nome: string }
   | { tipo: "incluir"; nome: string }
   | { tipo: "promo"; nome: string }
+  | { tipo: "acompanhar"; nome: string; sim: boolean }
   | { tipo: "interesse"; termos: string; preco_max: number | null }
   | { tipo: "interesses" }
   | { tipo: "esquecerInteresse"; id: number }
@@ -93,6 +94,9 @@ export function lerComando(texto: string): Comando {
   if ((m = t.match(/^(fora|exclui|excluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "excluir", nome: m[2].trim() };
   if ((m = t.match(/^(volta|inclui|incluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "incluir", nome: m[2].trim() };
   if ((m = t.match(/^promo(?:[çc][ãa]o)?\s+(.+)$/i)) && pareceNome(m[1])) return { tipo: "promo", nome: m[1].trim() };
+  if ((m = t.match(/^(acompanha|acompanhar|segue|seguir)\s+(?:o\s+)?(?:grupo\s+)?(.+)$/i)) && pareceNome(m[2])) return { tipo: "acompanhar", nome: m[2].trim(), sim: true };
+  if ((m = t.match(/^(solta|soltar|deixa de acompanhar|para de acompanhar)\s+(?:o\s+)?(?:grupo\s+)?(.+)$/i)) && pareceNome(m[2]))
+    return { tipo: "acompanhar", nome: m[2].trim(), sim: false };
   if (/^(interesses|meus interesses|ofertas)[.!?]?$/i.test(t)) return { tipo: "interesses" };
   if ((m = t.match(/^esquece\s+(?:o\s+)?interesse\s+#?(\d+)[.!]?$/i))) return { tipo: "esquecerInteresse", id: Number(m[1]) };
   if ((m = t.match(/^interesse[\s:,-]+([\s\S]+)$/i))) {
@@ -155,6 +159,7 @@ const AJUDA = `*Comandos*
 • confirma N · feito N · ignora N — compromissos
 • fora <nome> — tira a conversa ou o grupo do assistente (e apaga o que já tinha)
 • volta <nome> — põe de volta
+• acompanha <grupo> — leio o grupo sempre (obra, projeto), não só quando citam você, e descrevo as fotos · solta <grupo> desfaz
 • promo <grupo> — grupo de promoção: sai do assistente, mas as ofertas passam pelos seus interesses
 • interesse <palavras> até <valor> — me avisa quando sair oferta assim ("interesse monitor 27 até 900"; "-palavra" exclui)
 • interesses — a lista, os grupos vigiados e as últimas ofertas · esquece interesse N
@@ -226,6 +231,8 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
       return alternarChat(deps, c.nome, c.tipo === "excluir");
     case "promo":
       return marcarGrupoDePromo(deps, c.nome);
+    case "acompanhar":
+      return acompanharPeloNome(deps, c.nome, c.sim);
     case "interesse": {
       const id = await adicionarInteresse(deps.db, c.termos, c.preco_max);
       return deps.avisar(`Anotado: ${descreverInteresse({ id, termos: c.termos, preco_max: c.preco_max })}. Aviso quando sair nos grupos de promoção.`);
@@ -494,6 +501,21 @@ async function relatorioAutonomia(deps: DepsControle): Promise<string> {
 /** Dez rascunhos decididos e nove em dez sem ajuste: o assistente já escreve como ele ali. */
 export function sugerirSubir(x: { decididos: number; sem_ajuste: number; autonomia: number | null }): boolean {
   return x.decididos >= 10 && x.sem_ajuste / x.decididos >= 0.9 && (x.autonomia ?? 0) < 3;
+}
+
+/** "acompanha <grupo>" e "solta <grupo>": só grupo, e só um. */
+async function acompanharPeloNome(deps: DepsControle, nome: string, sim: boolean): Promise<void> {
+  const achados = (await repo.buscarContatos(deps.db, nome, 5)).filter((c) => c.grupo && !c.excluido);
+  if (!achados.length) return deps.avisar(`Não achei grupo "${nome}".`);
+  const exato = achados.filter((c) => repo.nomeDe(c).toLowerCase() === nome.toLowerCase());
+  const alvo = exato.length === 1 ? exato[0] : achados.length === 1 ? achados[0] : null;
+  if (!alvo) return deps.avisar(`Achei mais de um. Mande o nome exato:\n${achados.map((c) => `• ${repo.nomeDe(c)}`).join("\n")}`);
+  await repo.acompanharGrupo(deps.db, alvo.jid, sim);
+  return deps.avisar(
+    sim
+      ? `Acompanhando ${repo.nomeDe(alvo)}: leio tudo o que chegar (não só quando citam você) e descrevo as fotos.`
+      : `${repo.nomeDe(alvo)} volta ao normal: só leio quando citam você.`,
+  );
 }
 
 /** "promo <grupo>": só grupo, e só um. Apaga o que havia, como o `fora`. */
