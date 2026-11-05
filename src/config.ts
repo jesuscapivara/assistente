@@ -39,6 +39,11 @@ const Esquema = z.object({
   // comandos valem nos dois. Sem o chat id, o log mostra o id de quem escreveu ao bot.
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
+  // Conta do dono no Telegram (opcional), só para ler os grupos e canais de promoção que
+  // ele marcar. Gerados juntos por scripts/telegram-login.mjs; a sessão vale como senha.
+  TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
+  TELEGRAM_API_HASH: z.string().optional(),
+  TELEGRAM_SESSAO: z.string().optional(),
 
   // Google (opcional): agenda e Gmail. Token gerado com scripts/google.mjs.
   GOOGLE_CLIENT_ID: z.string().optional(),

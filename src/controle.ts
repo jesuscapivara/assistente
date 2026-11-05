@@ -13,6 +13,7 @@ import { corrigirLeitura } from "./corrigir.js";
 import { cuidarDoItem, gravarPauta, itemDaPauta, lerPauta, type DepsPauta } from "./pauta.js";
 import { atualizarCaderno, contextoDoChat, lerCaderno, limparCaderno } from "./memoria.js";
 import * as repo from "./repo.js";
+import { marcarPromoTelegramPeloNome } from "./telegram_conta.js";
 import { montarResumo } from "./resumo.js";
 import type { Evolution } from "./whatsapp/evolution.js";
 
@@ -55,6 +56,7 @@ export type Comando =
   | { tipo: "excluir"; nome: string }
   | { tipo: "incluir"; nome: string }
   | { tipo: "promo"; nome: string }
+  | { tipo: "promoTelegram"; nome: string; sim: boolean }
   | { tipo: "acompanhar"; nome: string; sim: boolean }
   | { tipo: "interesse"; termos: string; preco_max: number | null }
   | { tipo: "interesses" }
@@ -93,6 +95,9 @@ export function lerComando(texto: string): Comando {
   }
   if ((m = t.match(/^(fora|exclui|excluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "excluir", nome: m[2].trim() };
   if ((m = t.match(/^(volta|inclui|incluir)\s+(.+)$/i)) && pareceNome(m[2])) return { tipo: "incluir", nome: m[2].trim() };
+  // Antes do "promo <grupo>": "promo telegram Pegue Promo" é um chat do Telegram.
+  if ((m = t.match(/^(promo|solta)(?:[çc][ãa]o)?\s+(?:no\s+)?telegram\s+(.+)$/i)) && pareceNome(m[2]))
+    return { tipo: "promoTelegram", nome: m[2].trim(), sim: m[1].toLowerCase() === "promo" };
   if ((m = t.match(/^promo(?:[çc][ãa]o)?\s+(.+)$/i)) && pareceNome(m[1])) return { tipo: "promo", nome: m[1].trim() };
   if ((m = t.match(/^(acompanha|acompanhar|segue|seguir)\s+(?:o\s+)?(?:grupo\s+)?(.+)$/i)) && pareceNome(m[2])) return { tipo: "acompanhar", nome: m[2].trim(), sim: true };
   if ((m = t.match(/^(solta|soltar|deixa de acompanhar|para de acompanhar)\s+(?:o\s+)?(?:grupo\s+)?(.+)$/i)) && pareceNome(m[2]))
@@ -161,6 +166,7 @@ const AJUDA = `*Comandos*
 • volta <nome> — põe de volta
 • acompanha <grupo> — leio o grupo sempre (obra, projeto), não só quando citam você, e descrevo as fotos · solta <grupo> desfaz
 • promo <grupo> — grupo de promoção: sai do assistente, mas as ofertas passam pelos seus interesses
+• promo telegram <grupo> / solta telegram <grupo> — o mesmo para um grupo ou canal do seu Telegram
 • interesse <palavras> até <valor> — me avisa quando sair oferta assim ("interesse monitor 27 até 900"; "-palavra" exclui)
 • interesses — a lista, os grupos vigiados e as últimas ofertas · esquece interesse N
 • resumo
@@ -231,6 +237,8 @@ export async function tratarComando(deps: DepsControle, texto: string): Promise<
       return alternarChat(deps, c.nome, c.tipo === "excluir");
     case "promo":
       return marcarGrupoDePromo(deps, c.nome);
+    case "promoTelegram":
+      return deps.avisar(await marcarPromoTelegramPeloNome(deps.db, c.nome, c.sim));
     case "acompanhar":
       return acompanharPeloNome(deps, c.nome, c.sim);
     case "interesse": {

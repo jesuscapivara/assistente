@@ -26,6 +26,7 @@ import * as repo from "./repo.js";
 import { assuntoDe, coletarDia, diasEsperando, ficouParaTras, montarResumo, resumoEmTexto } from "./resumo.js";
 import { criarServidor } from "./server.js";
 import { criarTelegram } from "./telegram.js";
+import { ligarContaTelegram } from "./telegram_conta.js";
 import { transcrever } from "./transcricao.js";
 import { criarEvolution } from "./whatsapp/evolution.js";
 
@@ -352,6 +353,25 @@ const pararTelegram = telegram
       log,
     })
   : () => undefined;
+
+// Conta do dono no Telegram: só lê os grupos e canais de promoção marcados. Se cair,
+// o resto do assistente segue; o motivo vai para o log.
+let pararContaTelegram: () => Promise<void> = async () => {};
+if (cfg.TELEGRAM_API_ID && cfg.TELEGRAM_API_HASH && cfg.TELEGRAM_SESSAO) {
+  ligarContaTelegram({
+    apiId: cfg.TELEGRAM_API_ID,
+    apiHash: cfg.TELEGRAM_API_HASH,
+    sessao: cfg.TELEGRAM_SESSAO,
+    db,
+    aoOferta: async (chatId, nome, texto) => {
+      const aviso = await avaliarOferta(db, `tg:${chatId}`, nome, texto, cfg.FUSO);
+      if (aviso) await avisar(aviso);
+    },
+    log,
+  })
+    .then((parar) => (pararContaTelegram = parar))
+    .catch((err) => log({ err: String(err) }, "conta do Telegram não ligou"));
+}
 app.log.info(
   { migracoes: aplicadas, google: Boolean(google), koreos: Boolean(koreos), painel: Boolean(cfg.PAINEL_TOKEN), mcp: Boolean(cfg.MCP_TOKEN) },
   "assistente no ar",
@@ -369,6 +389,7 @@ for (const sinal of ["SIGINT", "SIGTERM"] as const) {
   process.on(sinal, async () => {
     pararAgenda();
     pararTelegram();
+    await pararContaTelegram().catch(() => undefined);
     await app.close();
     await db.end();
     process.exit(0);

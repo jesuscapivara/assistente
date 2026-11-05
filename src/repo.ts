@@ -327,7 +327,10 @@ export async function gruposAcompanhados(db: Db): Promise<string[]> {
 
 /** Os nomes dos grupos de promoção vigiados. */
 export async function gruposDePromo(db: Db): Promise<string[]> {
-  const r = await db.query<{ nome: string }>(`SELECT ${NOME_SQL} AS nome FROM contatos c WHERE c.promo ORDER BY 1`);
+  const r = await db.query<{ nome: string }>(
+    `SELECT ${NOME_SQL} AS nome FROM contatos c WHERE c.promo
+     UNION ALL SELECT nome || ' (Telegram)' FROM telegram_chats WHERE promo ORDER BY 1`,
+  );
   return r.rows.map((x) => x.nome);
 }
 

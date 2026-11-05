@@ -158,6 +158,14 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   em `TELEGRAM_BOT_TOKEN`, mande qualquer mensagem ao bot e pegue o seu id no log
   ("mensagem de chat que não é o do dono") para `TELEGRAM_CHAT_ID`. Daí em diante avisos e
   resumo vão pelo bot, e os comandos (texto ou áudio) valem lá e no chat consigo mesmo.
+- **Grupos de promoção do Telegram** (só leitura, pela sua conta): o bot não lê grupo em que
+  não foi colocado por um administrador. Pegue `api_id` e `api_hash` em
+  https://my.telegram.org (API development tools) e, na VM, rode
+  `docker compose run --rm -T assistente node scripts/telegram-login.mjs >> .env` (pede os
+  dois, o número, o código e a senha de duas etapas; grava `TELEGRAM_API_ID`,
+  `TELEGRAM_API_HASH` e `TELEGRAM_SESSAO`) e `docker compose up -d assistente`. Depois,
+  `promo telegram <grupo>`. Nada desses chats é guardado além do nome; a sessão vale como
+  senha e se encerra em Telegram > Configurações > Dispositivos.
 - **Google (agenda e Gmail)**: no Google Cloud Console, ative as APIs *Google Calendar* e
   *Gmail*, crie um *OAuth client ID* do tipo *Desktop app* e, **no seu computador**, rode
   `GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… node scripts/google.mjs`. Autorize no navegador e

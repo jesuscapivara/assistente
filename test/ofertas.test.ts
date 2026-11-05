@@ -8,6 +8,7 @@ import { abrirDb, migrar, type Db } from "../src/db.js";
 import { ingerir } from "../src/ingestao.js";
 import { adicionarInteresse, avaliarOferta, casa, comparacao, lerInteresse, lerValor, precos, textoDosInteresses } from "../src/ofertas.js";
 import * as repo from "../src/repo.js";
+import { gravarChatsTelegram, marcarPromoTelegramPeloNome, promoTelegram } from "../src/telegram_conta.js";
 
 const URL_TESTE = process.env.DATABASE_URL_TESTE;
 const MONITOR = `🔥 Monitor LG UltraGear Tela VA FHD 32”, 144Hz nativo, 1ms (MBR), AMD FreeSync
@@ -79,6 +80,8 @@ describe("regra das ofertas", () => {
     ["ofertas", { tipo: "interesses" }],
     ["esquece interesse 3", { tipo: "esquecerInteresse", id: 3 }],
     ["promo Emipe Promoções", { tipo: "promo", nome: "Emipe Promoções" }],
+    ["promo telegram Pegue Promo", { tipo: "promoTelegram", nome: "Pegue Promo", sim: true }],
+    ["solta no telegram Pegue Promo", { tipo: "promoTelegram", nome: "Pegue Promo", sim: false }],
     ["esquece 4", { tipo: "esquecer", id: 4 }],
     ["acompanha Obra Largo do Rosário", { tipo: "acompanhar", nome: "Obra Largo do Rosário", sim: true }],
     ["acompanhar o grupo HIRO", { tipo: "acompanhar", nome: "HIRO", sim: true }],
@@ -130,7 +133,7 @@ describe.skipIf(!URL_TESTE)("ofertas com banco", () => {
   afterAll(async () => db?.end());
   beforeEach(async () => {
     avisos = [];
-    await db.query("TRUNCATE contatos, mensagens, interesses, ofertas_avisadas RESTART IDENTITY CASCADE");
+    await db.query("TRUNCATE contatos, mensagens, interesses, ofertas_avisadas, telegram_chats RESTART IDENTITY CASCADE");
   });
 
   it("grupo de promoção não grava nada, avisa uma vez e respeita o teto", async () => {
@@ -178,6 +181,22 @@ describe.skipIf(!URL_TESTE)("ofertas com banco", () => {
     await repo.excluirChat(db, GRUPO, false);
     expect(await oferta("agora grava")).toBe("gravado");
     expect(await repo.gruposDePromo(db)).toEqual([]);
+  });
+  it("chat do Telegram vira promoção pelo nome, sem acento nem caixa", async () => {
+    expect(await marcarPromoTelegramPeloNome(db, "Pegue Promo")).toContain("ainda não está ligada");
+    await gravarChatsTelegram(db, [
+      { id: "-1001", nome: "Pegue Promo 🔥" },
+      { id: "-1002", nome: "Pegue Promo Games" },
+      { id: "-1003", nome: "Família" },
+    ]);
+    expect(await marcarPromoTelegramPeloNome(db, "pegue promo")).toContain("Achei mais de um");
+    expect(await marcarPromoTelegramPeloNome(db, "Pegue Promo 🔥")).toContain("virou grupo de promoção");
+    expect([...(await promoTelegram(db)).entries()]).toEqual([["-1001", "Pegue Promo 🔥"]]);
+    expect(await repo.gruposDePromo(db)).toEqual(["Pegue Promo 🔥 (Telegram)"]);
+    // O nome muda no Telegram: a releitura atualiza, sem perder a marca.
+    await gravarChatsTelegram(db, [{ id: "-1001", nome: "Pegue Promo" }]);
+    expect(await repo.gruposDePromo(db)).toEqual(["Pegue Promo (Telegram)"]);
+    expect(await marcarPromoTelegramPeloNome(db, "familia", false)).toContain("saiu dos grupos");
   });
   it("foto só é lida em conversa individual ou grupo acompanhado, e PDF sempre", async () => {
     const lidas: string[] = [];

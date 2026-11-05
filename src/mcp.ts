@@ -6,6 +6,7 @@ import { mimeDaMidia, nomeDoArquivo } from "./arquivos.js";
 import { dataComAno } from "./formato.js";
 import { adicionarInteresse, descreverInteresse, lerValor, listarInteresses, removerInteresse, textoDosInteresses, ultimasOfertas } from "./ofertas.js";
 import * as repo from "./repo.js";
+import { buscarChatsTelegram, marcarPromoTelegramPeloNome } from "./telegram_conta.js";
 import type { Evolution } from "./whatsapp/evolution.js";
 
 /**
@@ -277,10 +278,19 @@ const FERRAMENTAS = [
   }),
   ferramenta({
     nome: "marcar_promocao",
-    descricao: "Marca um grupo como grupo de promoção: apaga o que o assistente guardava dele, não grava mais as mensagens e passa a comparar cada oferta com os interesses do dono. Sem confirmar, só mostra o grupo; com confirmar: true, marca.",
+    descricao: "Marca um grupo como grupo de promoção: apaga o que o assistente guardava dele, não grava mais as mensagens e passa a comparar cada oferta com os interesses do dono. Sem confirmar, só mostra o grupo; com confirmar: true, marca. Com telegram: true, o grupo ou canal é do Telegram do dono (nada dele é guardado de qualquer jeito).",
     escreve: true,
-    entrada: z.object({ grupo: z.string().min(1).describe("nome ou jid do grupo"), confirmar: z.boolean().default(false) }),
-    async rodar({ grupo, confirmar }, deps) {
+    entrada: z.object({
+      grupo: z.string().min(1).describe("nome ou jid do grupo"),
+      confirmar: z.boolean().default(false),
+      telegram: z.boolean().default(false).describe("grupo ou canal do Telegram, não do WhatsApp"),
+    }),
+    async rodar({ grupo, confirmar, telegram }, deps) {
+      if (telegram) {
+        const achados = await buscarChatsTelegram(deps.db, grupo);
+        if (!confirmar && achados.length === 1) return `Telegram: ${achados[0].nome}. Chame com confirmar: true para vigiar.`;
+        return marcarPromoTelegramPeloNome(deps.db, grupo);
+      }
       const c = await acharConversa(deps.db, grupo);
       if (typeof c === "string") return c;
       if (!c.grupo) return `${repo.nomeDe(c)} não é grupo.`;
