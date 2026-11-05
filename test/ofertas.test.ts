@@ -162,6 +162,15 @@ describe.skipIf(!URL_TESTE)("ofertas com banco", () => {
 
     await oferta("Geladeira Frost Free R$ 2.999");
     expect(avisos).toHaveLength(2);
+
+    // Bem abaixo do teto é jogo ou acessório: não avisa nem vira "menor preço".
+    await adicionarInteresse(db, "ps5 -digital -jogo", 3400);
+    await oferta("🔥 Grand Theft Auto Vi Playstation 5 💵 R$ 349");
+    expect(avisos).toHaveLength(2);
+    expect((await db.query("SELECT count(*)::int AS n FROM precos_vistos WHERE interesse_id = 3")).rows[0].n).toBe(0);
+    await oferta("Console PlayStation 5 com leitor 💵 R$ 3.299");
+    expect(avisos).toHaveLength(3);
+    expect(avisos[2]).toContain("Primeiro preço que vejo");
     expect((await db.query("SELECT count(*)::int AS n FROM mensagens")).rows[0].n).toBe(0);
     expect(await repo.gruposDePromo(db)).toEqual(["Emipe Promoções"]);
 

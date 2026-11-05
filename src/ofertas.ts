@@ -107,6 +107,9 @@ export function lerInteresse(t: string): { termos: string; preco_max: number | n
   return { termos, preco_max: m[3] ? lerValor(m[3]) : null };
 }
 
+/** Fração do teto abaixo da qual a oferta não é o produto (ver `avaliarOferta`). */
+export const PISO = 0.4;
+
 /** "12/11": a data curta do menor preço, no fuso do dono. */
 function diaCurto(d: Date, fuso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: fuso });
@@ -140,6 +143,10 @@ export async function avaliarOferta(db: Db, chatJid: string, grupo: string, text
   const bateram: { i: Interesse; linha: string }[] = [];
   for (const i of interesses) {
     if (!casa(i.termos, texto)) continue;
+    // Preço muito abaixo do teto é jogo ou acessório do produto, não ele ("GTA VI PlayStation 5"
+    // por R$ 349 batia com o PS5 de R$ 3.400): nem avisa nem entra no histórico, que viraria
+    // um "menor preço" falso.
+    if (i.preco_max !== null && menor !== null && menor < i.preco_max * PISO) continue;
     const h = await db.query<{ preco: string; visto_em: Date }>(
       `SELECT preco, visto_em FROM precos_vistos WHERE interesse_id = $1 AND visto_em > now() - interval '90 days'
        ORDER BY preco, visto_em LIMIT 1`,
