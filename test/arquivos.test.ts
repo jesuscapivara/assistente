@@ -151,7 +151,7 @@ describe.skipIf(!URL_TESTE)("arquivos com banco", () => {
     await db.query("UPDATE rascunhos SET risco = 'baixo' WHERE id = 1");
     expect(await repo.reservarEnvio(db, 1, { nivelMinimo: 3, padrao: 0, agendado: false, agora: new Date() })).toBeNull();
 
-    expect(await mcp("enviar_rascunho", { id: 1 })).toBe("Enviado o #1.");
+    expect(await mcp("enviar_rascunho", { id: 1 })).toMatch(/^Enviado o #1\.\n.*esperar_resposta\.py "5551977777777@s\.whatsapp\.net"/s);
     expect(enviadas).toEqual([{ destino: CLIENTE, nome: "Proposta Obra Ç.pdf", legenda: "Segue a proposta" }]);
     const gravada = (await db.query("SELECT tipo, texto FROM mensagens WHERE id = 'D1'")).rows[0];
     expect(gravada).toEqual({ tipo: "documento", texto: "[arquivo: Proposta Obra Ç.pdf] Segue a proposta" });

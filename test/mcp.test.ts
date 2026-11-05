@@ -164,6 +164,13 @@ describe.skipIf(!URL_TESTE)("ferramentas do MCP com banco", () => {
     expect(conversa).toMatch(/\[\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}\] Lucas: Mando amanhã cedo/);
     expect(conversa.indexOf("orçamento")).toBeLessThan(conversa.indexOf("Obrigada"));
 
+    const json = JSON.parse((await ferramenta(app, "ler_conversa", { contato: "Fernanda", formato: "json", desde: new Date(Date.now() - 29.5 * 3600_000).toISOString() })).content[0].text);
+    expect(json).toMatchObject({ jid: FERNANDA, nome: "Fernanda", grupo: false });
+    expect(json.mensagens.map((m: any) => [m.de_mim, m.quem, m.texto])).toEqual([
+      [true, "Lucas", "Mando amanhã cedo"],
+      [false, "Fernanda", "Obrigada!"],
+    ]);
+
     const antes = (await ferramenta(app, "ler_conversa", { contato: FERNANDA, ate: new Date(Date.now() - 10 * 3600_000).toISOString() })).content[0].text;
     expect(antes).toContain("orçamento");
     expect(antes).not.toContain("Obrigada");
@@ -279,7 +286,7 @@ describe.skipIf(!URL_TESTE)("ferramentas do MCP com banco", () => {
     expect(envio.enviadas).toHaveLength(0);
     expect(envio.avisos[0]).toContain("Oi Fernanda, tudo certo.");
 
-    expect((await ferramenta(app2, "enviar_rascunho", { id: 1 })).content[0].text).toBe("Enviado o #1.");
+    expect((await ferramenta(app2, "enviar_rascunho", { id: 1 })).content[0].text).toMatch(/^Enviado o #1\./);
     expect(envio.enviadas).toEqual([{ destino: FERNANDA, texto: "Oi Fernanda, tudo certo." }]);
     expect((await ferramenta(app2, "ler_conversa", { contato: FERNANDA })).content[0].text).toContain("Lucas: Oi Fernanda, tudo certo.");
     expect((await ferramenta(app2, "enviar_rascunho", { id: 1 })).content[0].text).toMatch(/não está aguardando/);
