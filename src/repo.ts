@@ -693,6 +693,63 @@ export function fichaEmTexto(c: Contato): string {
     .join("\n");
 }
 
+export interface FichaExportada {
+  jid: string;
+  nome: string;
+  grupo: boolean;
+  relacao: string | null;
+  quem_e: string;
+  tom: string;
+  assuntos_abertos: string;
+  situacao: string;
+  espera_resposta: boolean;
+  aguardando: string;
+  aguardando_desde: Date | null;
+  fatos: string;
+  mensagens: number;
+  primeira_em: Date | null;
+  ultima_em: Date | null;
+  compromissos: { id: number; descricao: string; quando: Date | null; responsavel: string; status: string; criado_em: Date }[];
+  datas: { descricao: string; dia: number; mes: number }[];
+}
+
+/**
+ * Tudo o que o assistente sabe de cada conversa, num pacote: as anotações do Claude Code
+ * no PC do dono são geradas daqui por script, sem modelo. Compromissos abertos sempre;
+ * os fechados, só dos últimos `dias`. Fora e sistema não entram; grupo sem leitura e
+ * sem compromisso também não, que não teria o que anotar.
+ */
+export async function exportarFichas(db: Db, dias = 120): Promise<FichaExportada[]> {
+  const r = await db.query<Omit<FichaExportada, "compromissos" | "datas">>(
+    `SELECT c.jid, ${NOME_SQL} AS nome, c.grupo, c.relacao, c.resumo AS quem_e, c.tom, c.assuntos_abertos, c.situacao,
+            c.espera_resposta, c.aguardando, c.aguardando_desde, c.memoria AS fatos,
+            u.mensagens, u.primeira_em, u.ultima_em
+     FROM contatos c
+     JOIN LATERAL (SELECT count(*)::int AS mensagens, min(enviada_em) AS primeira_em, max(enviada_em) AS ultima_em
+                   FROM mensagens WHERE chat_jid = c.jid) u ON TRUE
+     WHERE NOT c.excluido AND NOT c.sistema
+       AND (u.mensagens > 0 OR c.resumo <> '' OR EXISTS (SELECT 1 FROM compromissos k WHERE k.chat_jid = c.jid))
+     ORDER BY u.ultima_em DESC NULLS LAST`,
+  );
+  const ks = await db.query<FichaExportada["compromissos"][number] & { chat_jid: string }>(
+    `SELECT id, chat_jid, descricao, quando, responsavel, status, criado_em FROM compromissos
+     WHERE status IN ('sugerido', 'confirmado') OR criado_em > now() - make_interval(days => $1)
+     ORDER BY COALESCE(quando, criado_em)`,
+    [dias],
+  );
+  const ds = await db.query<{ chat_jid: string; descricao: string; dia: number; mes: number }>("SELECT chat_jid, descricao, dia, mes FROM datas ORDER BY mes, dia");
+  const porJid = <T extends { chat_jid: string }>(linhas: T[]) => {
+    const m = new Map<string, Omit<T, "chat_jid">[]>();
+    for (const { chat_jid, ...resto } of linhas) m.set(chat_jid, [...(m.get(chat_jid) ?? []), resto]);
+    return m;
+  };
+  const kPor = porJid(ks.rows);
+  const dPor = porJid(ds.rows);
+  return r.rows
+    .map((c) => ({ ...c, compromissos: kPor.get(c.jid) ?? [], datas: dPor.get(c.jid) ?? [] }))
+    .filter((c) => !c.grupo || c.situacao || c.quem_e || c.compromissos.length);
+}
+
 /** Atualiza o que o dono espera do contato; a data só muda quando o assunto muda. */
 export async function atualizarAguardando(db: Db, jid: string, aguardando: string | null): Promise<void> {
   const novo = (aguardando ?? "").trim();

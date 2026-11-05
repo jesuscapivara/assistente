@@ -174,7 +174,10 @@ Pré-requisitos: Docker e a Evolution GO do KoreOS rodando na mesma VM.
   novo), `buscar_mensagens`, `conversas_recentes` (por dias ou `desde`), `novidades` (tudo que
   chegou depois de um instante, por conversa, numa chamada: é o que atualiza as anotações do
   Claude Code sem ler conversa por conversa) e `pendencias`; conversa tirada com `fora` não aparece. Com envio ligado, também `adicionar_interesse`,
-  `remover_interesse` e `marcar_promocao` (pede `confirmar: true`); `interesses` lista. Desde a 1.13.0
+  `remover_interesse` e `marcar_promocao` (pede `confirmar: true`); `interesses` lista.
+  Desde a 1.16.0: `exportar` devolve em JSON tudo o que o assistente sabe de cada conversa
+  (ficha, espera, compromissos, datas), para gerar anotações por script, sem modelo; e, com
+  envio ligado, `concluir_compromisso` (feito/descartado) e `anotar_aguardando` (vazio limpa). Desde a 1.13.0
   também envia, em dois passos: `preparar_mensagem` grava um rascunho (que chega no seu canal,
   onde vale `ok`/veto) e `enviar_rascunho` manda depois do seu sim na sessão; `criar_grupo`
   só cria com `confirmar: true`. Para valer em toda sessão, registre no escopo do usuário, pelo mesmo

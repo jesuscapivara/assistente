@@ -264,6 +264,38 @@ const FERRAMENTAS = [
     },
   }),
   ferramenta({
+    nome: "exportar",
+    descricao: "Tudo o que o assistente sabe de cada conversa, em JSON: ficha (relação, quem é, assuntos, situação, fatos), o que o dono espera da pessoa, compromissos e datas. Feita para script que gera anotações sem modelo; para ler, prefira buscar_contato.",
+    entrada: z.object({ dias: z.number().int().min(1).max(400).default(120).describe("compromissos já fechados desde quantos dias") }),
+    async rodar({ dias }, { db }) {
+      return JSON.stringify(await repo.exportarFichas(db, dias));
+    },
+  }),
+  ferramenta({
+    nome: "concluir_compromisso",
+    descricao: "Fecha um compromisso anotado pelo assistente (#id em pendencias): feito, quando já aconteceu ou foi resolvido; descartado, quando não era compromisso ou caiu. Sai do resumo da manhã e das cobranças.",
+    escreve: true,
+    entrada: z.object({ id: z.number().int().positive(), status: z.enum(["feito", "descartado"]).default("feito") }),
+    async rodar({ id, status }, { db }) {
+      return (await repo.mudarCompromisso(db, id, status)) ? `Compromisso #${id}: ${status}.` : `Não achei o compromisso #${id}.`;
+    },
+  }),
+  ferramenta({
+    nome: "anotar_aguardando",
+    descricao: "Anota o que o dono está esperando de uma pessoa (vira cobrança depois de alguns dias), ou limpa com texto vazio quando ela já entregou.",
+    escreve: true,
+    entrada: z.object({
+      contato: z.string().min(1).describe("nome ou jid"),
+      texto: z.string().max(300).describe("o que ela ficou de fazer; vazio limpa"),
+    }),
+    async rodar({ contato, texto }, deps) {
+      const c = await acharConversa(deps.db, contato);
+      if (typeof c === "string") return c;
+      await repo.atualizarAguardando(deps.db, c.jid, texto);
+      return texto.trim() ? `Anotado: o dono espera de ${repo.nomeDe(c)} ${texto.trim()}.` : `${repo.nomeDe(c)}: nada mais em espera.`;
+    },
+  }),
+  ferramenta({
     nome: "preparar_mensagem",
     descricao: "Grava o rascunho de uma mensagem do dono para uma pessoa ou grupo do WhatsApp, sem enviar. Devolve o #id, o destino e o texto, para mostrar ao dono antes de enviar_rascunho.",
     envia: true,

@@ -74,7 +74,7 @@ describe("protocolo do MCP", () => {
     expect((await chamar(app, { jsonrpc: "2.0", method: "notifications/initialized" })).statusCode).toBe(202);
 
     const lista = (await chamar(app, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
-    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "interesses", "ler_conversa", "novidades", "pendencias"]);
+    expect(lista.map((t: any) => t.name).sort()).toEqual(["buscar_contato", "buscar_mensagens", "conversas_recentes", "exportar", "interesses", "ler_conversa", "novidades", "pendencias"]);
     expect(lista.every((t: any) => t.annotations.readOnlyHint && t.inputSchema.type === "object")).toBe(true);
     // Nada que envie: o envio só sai por executarEnvio, com as travas.
     expect(lista.some((t: any) => /envi|respond|propor/.test(t.name))).toBe(false);
@@ -84,7 +84,7 @@ describe("protocolo do MCP", () => {
     const comEnvio = servidor({} as Db, new EnvioFalso());
     const lista = (await chamar(comEnvio, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json().result.tools;
     const envio = lista.filter((t: any) => !t.annotations.readOnlyHint).map((t: any) => t.name).sort();
-    expect(envio).toEqual(["adicionar_interesse", "criar_grupo", "enviar_rascunho", "marcar_promocao", "preparar_mensagem", "remover_interesse"]);
+    expect(envio).toEqual(["adicionar_interesse", "anotar_aguardando", "concluir_compromisso", "criar_grupo", "enviar_rascunho", "marcar_promocao", "preparar_mensagem", "remover_interesse"]);
     const ini = (await chamar(comEnvio, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).json();
     expect(ini.result.instructions).toMatch(/só depois do sim dele/);
   });
@@ -191,6 +191,34 @@ describe.skipIf(!URL_TESTE)("ferramentas do MCP com banco", () => {
     // Pessoa não é tocada, mesmo com o jid na lista.
     await msg(FERNANDA, "oi");
     expect(await repo.gravarNomesDeGrupos(db, [{ jid: FERNANDA, nome: "Outro nome" }])).toBe(0);
+  });
+
+  it("exporta as fichas e fecha compromisso e espera pelo MCP", async () => {
+    await msg(FERNANDA, "Te mando as medidas na sexta");
+    await db.query("UPDATE contatos SET relacao = 'cliente', resumo = 'cliente da reforma', situacao = 'vai mandar as medidas' WHERE jid = $1", [FERNANDA]);
+    const k = await db.query<{ id: number }>(
+      "INSERT INTO compromissos (chat_jid, descricao, responsavel) VALUES ($1, 'mandar as medidas', 'contato') RETURNING id",
+      [FERNANDA],
+    );
+    const id = k.rows[0].id;
+
+    const fichas = JSON.parse((await ferramenta(app, "exportar")).content[0].text);
+    const f = fichas.find((x: any) => x.jid === FERNANDA);
+    expect(f).toMatchObject({ nome: "Fernanda", relacao: "cliente", quem_e: "cliente da reforma", mensagens: 1 });
+    expect(f.compromissos).toEqual([expect.objectContaining({ id, descricao: "mandar as medidas", status: "sugerido" })]);
+
+    const comEnvio = servidor(db, new EnvioFalso());
+    expect((await ferramenta(comEnvio, "concluir_compromisso", { id })).content[0].text).toBe(`Compromisso #${id}: feito.`);
+    expect((await ferramenta(comEnvio, "concluir_compromisso", { id: 9999 })).content[0].text).toMatch(/Não achei/);
+    expect(await repo.compromissosAbertos(db)).toHaveLength(0);
+
+    expect((await ferramenta(comEnvio, "anotar_aguardando", { contato: "Fernanda", texto: "as medidas da cozinha" })).content[0].text).toContain("as medidas da cozinha");
+    expect((await repo.lerContato(db, FERNANDA))?.aguardando).toBe("as medidas da cozinha");
+    await ferramenta(comEnvio, "anotar_aguardando", { contato: FERNANDA, texto: "" });
+    expect((await repo.lerContato(db, FERNANDA))?.aguardando).toBe("");
+    // Sem envio, o MCP é só leitura: as de escrita nem existem.
+    const semEnvio = await chamar(app, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "concluir_compromisso", arguments: { id } } });
+    expect(semEnvio.json().error.message).toMatch(/ferramenta desconhecida/);
   });
 
   it("nome ambíguo não escolhe sozinho", async () => {
